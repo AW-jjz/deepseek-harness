@@ -1,6 +1,6 @@
 /** Desktop installation admission and task inspection for the shared Web Host. */
 
-import type { Context } from '@deepseek-ai/cordis'
+import { CordisError, type Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-agent'
 import type {} from '@deepseek-ai/dsh-jobs'
 import type {} from '@deepseek-ai/dsh-client-connection'
@@ -29,19 +29,27 @@ export function installDesktopUpdateTaskControl(ctx: Context): (action: 'inspect
   let locked = false
   let lockGeneration = 0
   let stopped = false
-  ctx.effect(() => () => { stopped = true })
   const pendingRequests = new Set<Promise<void>>()
-  ctx.on('connection/request', async (_request, response, next) => {
-    if (locked) {
-      response.writeHead(503)
-      response.end()
-      return
-    }
-    const finished = Promise.withResolvers<void>()
-    pendingRequests.add(finished.promise)
-    try { await next() }
-    finally { pendingRequests.delete(finished.promise); finished.resolve() }
-  })
+  try {
+    ctx.effect(() => () => { stopped = true })
+    ctx.on('connection/request', async (_request, response, next) => {
+      if (locked) {
+        response.writeHead(503)
+        response.end()
+        return
+      }
+      const finished = Promise.withResolvers<void>()
+      pendingRequests.add(finished.promise)
+      try { await next() }
+      finally { pendingRequests.delete(finished.promise); finished.resolve() }
+    })
+  } catch (error) {
+    // A Host already disposing when startup reaches registration must not crash; the
+    // inspector reports stopping so update admission fails closed instead of looping.
+    if (!(error instanceof CordisError) || error.code !== 'INACTIVE_EFFECT') throw error
+    stopped = true
+    ctx.logger('desktop-update').warn('update task control skipped registration on a disposing Host context')
+  }
   return async (action) => {
     if (stopped) throw new Error('desktop update: Host is stopping')
     if (action === 'unlock') { locked = false; lockGeneration++ }
