@@ -198,8 +198,11 @@ export class DesktopHostProcess {
   async start(): Promise<DesktopHostReady> {
     if (this.child !== undefined) return this.readyPromise
     const entry = join(this.runtimeDir, 'node_modules', '@deepseek-ai', 'dsh-desktop-host', 'lib', 'index.js')
+    // V8 internals are exposed only for workspace development (inspector attached) or an
+    // explicit operator opt-in; production starts the Host without the flag.
+    const exposeInternals = this.inspectPort !== undefined || this.environment.DSH_EXPOSE_INTERNALS === '1'
     const child = spawn(this.node, [
-      '--expose-internals',
+      ...(exposeInternals ? ['--expose-internals'] : []),
       ...(this.inspectPort === undefined ? [] : [`--inspect=127.0.0.1:${String(this.inspectPort)}`]),
       entry,
       this.runtimeDir,
