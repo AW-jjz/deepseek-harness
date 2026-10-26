@@ -83,6 +83,50 @@ async function seedWorkspace(runtime: SlotTestRuntime): Promise<void> {
 }
 
 describe('session rename through the assembled browser', () => {
+  it('moves between rows with the arrow keys and Home/End', async () => {
+    const runtime = await createRuntime()
+    const second = 's2' as SessionId
+    await runtime.sessions.add({
+      id: SID,
+      summary: { title: 'First session', displayTitle: 'First session', cwd: '/w/alpha' },
+      session: { rename: vi.fn() },
+    })
+    await runtime.sessions.add({
+      id: second,
+      summary: { title: 'Second session', displayTitle: 'Second session', cwd: '/w/alpha' },
+      session: { rename: vi.fn() },
+    })
+    await runtime.sessions.retainFor(runtime.ctx, SID, { source: 'mainView' }).ready
+    await runtime.sessions.retainFor(runtime.ctx, second, { source: 'mainView' }).ready
+    await runtime.workspaces.update((draft) => {
+      draft.items = [{
+        workspaceId: 'w1' as WorkspaceId, title: 'alpha', path: '/w/alpha',
+        sessionIds: [SID, second], createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z',
+      }] as never
+    })
+    await declareFrame(runtime)
+    await runtime.mount({ inject: [...inject], apply })
+    const view = runtime.renderRoot()
+    const rows = await view.findAllByRole('treeitem')
+    // Recency order: the newest session (s2) leads the workspace row's children.
+    const [workspaceRow, newest, oldest] = rows
+    expect(workspaceRow?.getAttribute('data-row-key')).toBe('workspace:w1')
+    expect(newest?.getAttribute('data-row-key')).toBe('session:s2')
+    oldest!.focus()
+    // ArrowUp walks toward the newest row, then into the workspace row.
+    fireEvent.keyDown(oldest!, { key: 'ArrowUp' })
+    expect(document.activeElement).toBe(newest)
+    fireEvent.keyDown(document.activeElement!, { key: 'ArrowUp' })
+    expect(document.activeElement).toBe(workspaceRow)
+    // Direct moves land on the ends of the rendered list.
+    fireEvent.keyDown(document.activeElement!, { key: 'End' })
+    expect(document.activeElement).toBe(oldest)
+    fireEvent.keyDown(document.activeElement!, { key: 'Home' })
+    expect(document.activeElement).toBe(workspaceRow)
+    fireEvent.keyDown(document.activeElement!, { key: 'ArrowDown' })
+    expect(document.activeElement).toBe(newest)
+  })
+
   it('renders independently registered Session actions in declared order', async () => {
     const runtime = await createRuntime()
     const selected = vi.fn()

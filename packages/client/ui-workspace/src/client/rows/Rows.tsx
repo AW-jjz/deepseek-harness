@@ -11,7 +11,7 @@
  * session and workspace hover cards are suppressed while a menu is open.
  */
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { RefObject } from 'react'
+import type { KeyboardEvent as ReactKeyboardEvent, RefObject } from 'react'
 import clsx from 'clsx'
 import type { PropsRenderSlots } from '@deepseek-ai/dsh-client-ui-slots'
 import {
@@ -245,6 +245,31 @@ interface ProjectRowAccess {
  * @param props.t - the browser root's locale seat.
  * @returns the row element.
  */
+/**
+ * Move focus to a sibling row inside the containing tree.
+ * @param event - Keydown from a row that currently owns the focus.
+ * @returns true when the key moved focus and the row must not also act on it.
+ */
+function moveTreeFocus(event: ReactKeyboardEvent<HTMLDivElement>): boolean {
+  if (event.target !== event.currentTarget) return false
+  const key = event.key
+  if (key !== 'ArrowDown' && key !== 'ArrowUp' && key !== 'Home' && key !== 'End') return false
+  if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return false
+  const tree = event.currentTarget.closest('[role="tree"]')
+  if (tree === null) return false
+  const rows = [...tree.querySelectorAll<HTMLElement>('[role="treeitem"]')]
+  const index = rows.indexOf(event.currentTarget)
+  if (index < 0) return false
+  const destination = key === 'ArrowDown' ? rows[index + 1]
+    : key === 'ArrowUp' ? rows[index - 1]
+      : key === 'Home' ? rows[0]
+        : rows.at(-1)
+  if (destination === undefined) return false
+  event.preventDefault()
+  destination.focus()
+  return true
+}
+
 export function ProjectRowItem(props: ProjectRowItemProps) {
   const workspaceId = props.group.workspaceId
   return workspaceId === undefined
@@ -290,7 +315,16 @@ function ProjectRow({
       data-row-key={`workspace:${group.key}`}
       role="treeitem"
       aria-expanded={row.expanded}
+      tabIndex={0}
       onClick={onToggle}
+      onKeyDown={(event) => {
+        if (moveTreeFocus(event)) return
+        if (event.target !== event.currentTarget) return
+        if (event.key !== 'Enter' && event.key !== ' ') return
+        if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return
+        event.preventDefault()
+        onToggle()
+      }}
       draggable={drag !== undefined}
       onDragStart={drag === undefined
         ? undefined
@@ -675,7 +709,9 @@ export function SessionNodeItem({
       tabIndex={0}
       onClick={() => { onOpen(node.id) }}
       onKeyDown={(event) => {
-        if (event.target !== event.currentTarget || (event.key !== 'Enter' && event.key !== ' ')) return
+        if (moveTreeFocus(event)) return
+        if (event.target !== event.currentTarget) return
+        if (event.key !== 'Enter' && event.key !== ' ') return
         if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return
         event.preventDefault()
         onOpen(node.id)
