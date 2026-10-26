@@ -92,6 +92,53 @@ describe('desktop welcome presentation', () => {
     },
   )
 
+  it('reveals the key on request and hides it again', () => {
+    const view = mount()
+    fireEvent.click(view.button('#api-key'))
+    const reveal = view.button('#key-reveal')
+    expect(view.input.getAttribute('type')).toBe('password')
+    expect(reveal.getAttribute('aria-pressed')).toBe('false')
+    fireEvent.click(reveal)
+    expect(view.input.getAttribute('type')).toBe('text')
+    expect(view.button('#key-reveal').getAttribute('aria-pressed')).toBe('true')
+    fireEvent.click(view.button('#key-reveal'))
+    expect(view.input.getAttribute('type')).toBe('password')
+  })
+
+  it('lets the user stop waiting for a slow save without losing the draft', async () => {
+    const view = mount()
+    const saved = Promise.withResolvers<WelcomeSaveResult>()
+    view.api.saveApiKey.mockReturnValue(saved.promise)
+    fireEvent.click(view.button('#api-key'))
+    view.enterKey('sk-slow-example')
+    view.submit()
+    expect(view.button('#key-cancel').hidden).toBe(false)
+    fireEvent.click(view.button('#key-cancel'))
+    // The form is usable again and the value the user typed is still there.
+    expect(view.button('#key-cancel').hidden).toBe(true)
+    expect(view.button('#save-key').disabled).toBe(false)
+    expect(view.input.value).toBe('sk-slow-example')
+    expect(view.document.querySelector<HTMLElement>('#key-error')!.hidden).toBe(true)
+    // A late answer from the abandoned attempt must not clear the field or report an error.
+    saved.resolve({ ok: true })
+    await Promise.resolve()
+    expect(view.input.value).toBe('sk-slow-example')
+    expect(view.document.querySelector<HTMLElement>('#key-error')!.hidden).toBe(true)
+  })
+
+  it('names a timed-out save separately from a refused one', async () => {
+    const view = mount()
+    const timeout = Object.assign(new Error('timed out'), { name: 'TimeoutError' })
+    view.api.saveApiKey.mockRejectedValue(timeout)
+    fireEvent.click(view.button('#api-key'))
+    view.enterKey('sk-timeout-example')
+    view.submit()
+    await vi.waitFor(() => {
+      expect(view.document.querySelector('#key-error')!.textContent).toBe(view.api.messages.welcomeKeyTimeout)
+    })
+    expect(view.input.value).toBe('sk-timeout-example')
+  })
+
   it('retains an unsaved draft and allows retry after a refused save', async () => {
     const view = mount()
     view.api.saveApiKey.mockResolvedValue({ ok: false })

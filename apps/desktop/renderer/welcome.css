@@ -289,6 +289,26 @@ body {
   border-color: var(--dsw-alias-brand-primary);
 }
 
+/* Sits inside the field without stealing the input's click target or focus ring. */
+.key-reveal {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  height: 32px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.key-reveal[aria-pressed='true'] {
+  color: var(--dsw-alias-brand-primary);
+}
+
 .key-field input::placeholder {
   color: var(--dsw-alias-label-caption);
   opacity: 1;

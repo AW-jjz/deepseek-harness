@@ -28,8 +28,11 @@ export function Welcome({ api }: { api: WelcomeApi }) {
   const copyState = copyFeedback.status
   const [draft, setDraft] = useState('')
   const [error, setError] = useState('')
+  const [revealKey, setRevealKey] = useState(false)
   const [busy, setBusy] = useState(false)
   const busyRef = useRef(false)
+  /** Identifies the live save attempt, so a cancelled one cannot report back. */
+  const saveAttempt = useRef(0)
   const mounted = useRef(true)
   const revision = useRef(0)
   const input = useRef<HTMLInputElement>(null)
@@ -99,18 +102,33 @@ export function Welcome({ api }: { api: WelcomeApi }) {
     busyRef.current = true
     setBusy(true)
     setError('')
+    const attempt = ++saveAttempt.current
     try {
       const result = await api.saveApiKey(value)
-      if (!mounted.current) return
+      if (!mounted.current || attempt !== saveAttempt.current) return
       if (result.ok) setDraft('')
       else setError(m.welcomeKeyFailed)
-    } catch {
-      if (mounted.current) setError(m.welcomeKeyFailed)
+    } catch (error) {
+      if (!mounted.current || attempt !== saveAttempt.current) return
+      // A slow Host is a different problem from a rejected value.
+      setError(error instanceof Error && error.name === 'TimeoutError' ? m.welcomeKeyTimeout : m.welcomeKeyFailed)
     } finally {
-      busyRef.current = false
-      if (mounted.current) setBusy(false)
+      if (attempt === saveAttempt.current) {
+        busyRef.current = false
+        if (mounted.current) setBusy(false)
+      }
     }
   }
+  /** Stop waiting for the save: the form is usable again and the draft is kept. */
+  function cancelSave(): void {
+    if (!busyRef.current) return
+    saveAttempt.current++
+    busyRef.current = false
+    setBusy(false)
+    setError('')
+    input.current?.focus()
+  }
+
   async function skip() {
     if (busyRef.current) return
     busyRef.current = true
@@ -184,9 +202,12 @@ export function Welcome({ api }: { api: WelcomeApi }) {
         <header className="key-heading"><h1 id="key-title">{m.welcomeKeyTitle}</h1><p id="key-description">{m.welcomeKeyDescription}</p></header>
         <div className="key-field">
           <label className="visually-hidden" htmlFor="key-input">{m.welcomeKeyPlaceholder}</label>
-          <input ref={input} id="key-input" type="password" autoComplete="new-password" autoCapitalize="off" spellCheck={false} required
+          <input ref={input} id="key-input" type={revealKey ? 'text' : 'password'} autoComplete="new-password" autoCapitalize="off" spellCheck={false} required
             aria-describedby="key-description key-error" aria-invalid={error !== ''} placeholder={m.welcomeKeyPlaceholder}
             value={draft} disabled={busy} onChange={(event) => { setDraft(event.target.value); setError('') }} />
+          <button id="key-reveal" className="key-reveal" type="button" aria-pressed={revealKey}
+            aria-label={revealKey ? m.welcomeKeyHide : m.welcomeKeyShow} disabled={busy}
+            onClick={() => { setRevealKey(!revealKey) }}>{revealKey ? m.welcomeKeyHide : m.welcomeKeyShow}</button>
           <p id="key-error" className="key-error" role="alert" hidden={error === ''}>{error}</p>
         </div>
       </form>
@@ -214,6 +235,7 @@ export function Welcome({ api }: { api: WelcomeApi }) {
       </div>
       <div id="key-actions" className="actions" hidden={page !== 'key'}>
         <button id="save-key" className="primary" type="submit" form="key-form" disabled={busy || draft.trim() === ''}>{m.welcomeKeySave}</button>
+        <button id="key-cancel" className="secondary" type="button" hidden={!busy} onClick={cancelSave}>{m.welcomeAuthCancel}</button>
         <button id="skip-key" className="secondary" type="button" disabled={busy} onClick={() => { void skip() }}>{m.welcomeKeyLater}</button>
         <button id="back-to-login" className="back" type="button" disabled={busy} onClick={() => {
           if (busyRef.current) return
