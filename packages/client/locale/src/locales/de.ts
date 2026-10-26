@@ -36,6 +36,8 @@ export const de = {
   'back': 'Zurück',
   'brand.localBuild': 'Lokaler DSH-Build',
   'a11y.skipToContent': 'Zum Hauptinhalt springen',
+  'layout.resizeSidebar': 'Seitenleiste anpassen',
+  'layout.resizeRightbar': 'Rechtes Panel anpassen',
   'workspace.defaultName': 'Standardarbeitsbereich',
   'unknown': 'Unbekannt',
   'none': 'Keine',

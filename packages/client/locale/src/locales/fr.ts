@@ -36,6 +36,8 @@ export const fr = {
   'back': 'Retour',
   'brand.localBuild': 'Version locale de DSH',
   'a11y.skipToContent': 'Aller au contenu principal',
+  'layout.resizeSidebar': 'Redimensionner la barre latérale',
+  'layout.resizeRightbar': 'Redimensionner le panneau de droite',
   'workspace.defaultName': 'Espace de travail par défaut',
   'unknown': 'Inconnu',
   'none': 'Aucun',

@@ -36,6 +36,8 @@ export const ru = {
   'back': 'Назад',
   'brand.localBuild': 'Локальная сборка DSH',
   'a11y.skipToContent': 'Перейти к основному содержимому',
+  'layout.resizeSidebar': 'Изменить ширину боковой панели',
+  'layout.resizeRightbar': 'Изменить ширину правой панели',
   'workspace.defaultName': 'Рабочая область по умолчанию',
   'unknown': 'Неизвестно',
   'none': 'Нет',

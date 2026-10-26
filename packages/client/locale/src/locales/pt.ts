@@ -36,6 +36,8 @@ export const pt = {
   'back': 'Voltar',
   'brand.localBuild': 'Versão local do DSH',
   'a11y.skipToContent': 'Ir para o conteúdo principal',
+  'layout.resizeSidebar': 'Redimensionar a barra lateral',
+  'layout.resizeRightbar': 'Redimensionar o painel direito',
   'workspace.defaultName': 'Espaço de trabalho padrão',
   'unknown': 'Desconhecido',
   'none': 'Nenhum',

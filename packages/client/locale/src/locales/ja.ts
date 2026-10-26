@@ -36,6 +36,8 @@ export const ja = {
   'back': '戻る',
   'brand.localBuild': 'DSHローカルビルド',
   'a11y.skipToContent': 'メインコンテンツへスキップ',
+  'layout.resizeSidebar': 'サイドバーの幅を調整',
+  'layout.resizeRightbar': '右パネルの幅を調整',
   'workspace.defaultName': 'デフォルトワークスペース',
   'unknown': '不明',
   'none': 'なし',

@@ -35,6 +35,8 @@ export const en = {
   'back': 'Back',
   'brand.localBuild': 'DSH Local Build',
   'a11y.skipToContent': 'Skip to main content',
+  'layout.resizeSidebar': 'Resize sidebar',
+  'layout.resizeRightbar': 'Resize right panel',
   'workspace.defaultName': 'Default workspace',
   'unknown': 'Unknown',
   'none': 'None',

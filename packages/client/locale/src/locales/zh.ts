@@ -33,6 +33,8 @@ export const zh = {
   'back': '返回',
   'brand.localBuild': 'DSH 本地构建',
   'a11y.skipToContent': '跳到主要内容',
+  'layout.resizeSidebar': '调整侧栏宽度',
+  'layout.resizeRightbar': '调整右栏宽度',
   'workspace.defaultName': '默认工作区',
   'unknown': '未知',
   'none': '无',

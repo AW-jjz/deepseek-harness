@@ -450,6 +450,23 @@ describe('AppFrame right panel presentation', () => {
     expect(skip!.textContent).toBe('a11y.skipToContent')
   })
 
+  it('resizes the columns from the keyboard and exposes the width as a separator range', () => {
+    const { frame, instance } = mountFrame()
+    const sidebar = handleFor(frame, 'sidebar')
+    expect(sidebar.getAttribute('role')).toBe('separator')
+    expect(sidebar.getAttribute('aria-orientation')).toBe('vertical')
+    expect(sidebar.tabIndex).toBe(0)
+    const before = Number(sidebar.getAttribute('aria-valuenow'))
+    expect(Number(sidebar.getAttribute('aria-valuemin'))).toBeLessThan(before)
+    expect(Number(sidebar.getAttribute('aria-valuemax'))).toBeGreaterThan(before)
+    act(() => { sidebar.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true })) })
+    expect(Number(handleFor(frame, 'sidebar').getAttribute('aria-valuenow'))).toBe(before + 16)
+    // Shift takes a larger step, and the right column grows toward the left.
+    act(() => { handleFor(frame, 'sidebar').dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', shiftKey: true, bubbles: true })) })
+    expect(Number(handleFor(frame, 'sidebar').getAttribute('aria-valuenow'))).toBe(before + 80)
+    void instance
+  })
+
   it('lands the responsive auto-collapse instantly, keeping user toggles eased', () => {
     const { frame, instance } = mountFrame()
     // Shrinking across the breakpoint flips the collapse in the same update as

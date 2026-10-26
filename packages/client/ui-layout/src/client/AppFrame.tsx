@@ -19,7 +19,7 @@ import type { ReactNode } from 'react'
 import type {
   PropsLocale, PropsRenderSlots, PropsRuntime, PropsStore,
 } from '@deepseek-ai/dsh-client-ui-slots'
-import { CENTER_MIN, clampWidth, computeColumns, RIGHTBAR_DEFAULT_RATIO, RIGHTBAR_MAX_RATIO, RIGHTBAR_MIN, SIDEBAR_AUTO_COLLAPSE, SIDEBAR_COLLAPSED, SIDEBAR_DEFAULT } from './columns.ts'
+import { CENTER_MIN, clampWidth, computeColumns, RIGHTBAR_DEFAULT_RATIO, RIGHTBAR_MAX_RATIO, RIGHTBAR_MIN, SIDEBAR_AUTO_COLLAPSE, SIDEBAR_COLLAPSED, SIDEBAR_DEFAULT, SIDEBAR_MAX, SIDEBAR_MIN } from './columns.ts'
 import { DocumentTitle } from './DocumentTitle.tsx'
 import type { createLayoutStore } from './stores.ts'
 import css from './AppFrame.module.css'
@@ -55,7 +55,17 @@ function RightbarColumn(props: { children?: ReactNode }) {
  * One drag handle: pointer capture, rAF-throttled dx reports against the drag-start origin.
  * `side` keys the hover-reveal CSS to the owning column.
  */
-function DragHandle(props: { side: 'sidebar' | 'rightbar'; left: number; onStart: () => void; onDrag: (dx: number) => void; onEnd: () => void }) {
+function DragHandle(props: {
+  side: 'sidebar' | 'rightbar'
+  left: number
+  onStart: () => void
+  onDrag: (dx: number) => void
+  onEnd: () => void
+  /** Keyboard adjustment: current width, its bounds, and where a step lands. */
+  keyboard: { value: number; min: number; max: number; onChange: (next: number) => void }
+  /** Localized accessible name for the separator. */
+  label: string
+}) {
   const [dragging, setDragging] = useState(false)
   const origin = useRef(0)
   const latest = useRef(0)
@@ -108,6 +118,25 @@ function DragHandle(props: { side: 'sidebar' | 'rightbar'; left: number; onStart
       style={{ left: props.left }}
       data-side={props.side}
       data-dragging={dragging || undefined}
+      role="separator"
+      aria-orientation="vertical"
+      aria-label={props.label}
+      aria-valuenow={props.keyboard.value}
+      aria-valuemin={props.keyboard.min}
+      aria-valuemax={props.keyboard.max}
+      tabIndex={0}
+      onKeyDown={(event) => {
+        const step = event.shiftKey ? 64 : 16
+        // The right column grows when its handle moves left.
+        const direction = event.key === 'ArrowLeft' ? -step
+          : event.key === 'ArrowRight' ? step
+            : 0
+        if (direction === 0 || event.altKey || event.ctrlKey || event.metaKey) return
+        event.preventDefault()
+        const delta = props.side === 'rightbar' ? -direction : direction
+        const next = Math.min(props.keyboard.max, Math.max(props.keyboard.min, props.keyboard.value + delta))
+        if (next !== props.keyboard.value) props.keyboard.onChange(next)
+      }}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
@@ -300,9 +329,18 @@ export function AppFrame({
         </div>
       )}
       {/* The collapsed rail is fixed-width: no resize handle while closed. */}
-      {!sidebarCollapsed && <DragHandle side="sidebar" left={cols.sidebar} onStart={onSidebarStart} onDrag={onSidebarDrag} onEnd={onDragEnd} />}
+      {!sidebarCollapsed && <DragHandle side="sidebar" left={cols.sidebar} onStart={onSidebarStart} onDrag={onSidebarDrag} onEnd={onDragEnd}
+        keyboard={{ value: cols.sidebar, min: SIDEBAR_MIN, max: SIDEBAR_MAX, onChange: (width) => { actions.setSidebar(width) } }}
+        label={t('layout.resizeSidebar')} />}
       {layoutInfo.rightbarShown && !layoutInfo.rightbarFullscreen && normal.rightbar > 0 && (
-        <DragHandle side="rightbar" left={viewport - normal.rightbar} onStart={onRightbarStart} onDrag={onRightbarDrag} onEnd={onDragEnd} />
+        <DragHandle side="rightbar" left={viewport - normal.rightbar} onStart={onRightbarStart} onDrag={onRightbarDrag} onEnd={onDragEnd}
+          keyboard={{
+            value: normal.rightbar,
+            min: RIGHTBAR_MIN,
+            max: Math.floor(viewport * RIGHTBAR_MAX_RATIO),
+            onChange: (width) => { actions.setRightbar(width) },
+          }}
+          label={t('layout.resizeRightbar')} />
       )}
     </div>
   )

@@ -36,6 +36,8 @@ export const es = {
   'back': 'Atrás',
   'brand.localBuild': 'Compilación local de DSH',
   'a11y.skipToContent': 'Saltar al contenido principal',
+  'layout.resizeSidebar': 'Ajustar el ancho de la barra lateral',
+  'layout.resizeRightbar': 'Ajustar el ancho del panel derecho',
   'workspace.defaultName': 'Espacio de trabajo predeterminado',
   'unknown': 'Desconocido',
   'none': 'Ninguno',
