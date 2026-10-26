@@ -145,7 +145,15 @@ async function remoteVersions(options: DesktopBuildVersionSuggestionOptions): Pr
  */
 export async function suggestDesktopBuildVersion(options: DesktopBuildVersionSuggestionOptions): Promise<string> {
   const prefix = `${desktopBuildVersionPrefix(options.productVersion)}${options.date ?? desktopBuildDateSegment()}.`
-  const published = await remoteVersions(options)
+  let published: string[] | undefined
+  try {
+    published = await remoteVersions(options)
+  } catch (error) {
+    // An internal build configures no update destination at all; its numbering comes from the
+    // artifacts beside it, which is the same authority for a build that is only handed over.
+    process.stdout.write(`desktop package: no update destination (${
+      error instanceof Error ? error.message : String(error)}); numbering from local artifacts\n`)
+  }
   const taken = published ?? await localVersions(options.artifactsRoot)
   const used = sequenceNumbers(taken, prefix)
   const next = used.length === 0 ? 1 : Math.max(...used) + 1
