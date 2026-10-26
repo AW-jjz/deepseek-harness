@@ -4,7 +4,7 @@ import { resolveMacOSSignatureCacheDirectory } from './macos-signature-cache-dir
 import { packagingStep } from './packaging-step.mjs'
 import { spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, unlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { delimiter, join, relative, resolve } from 'node:path'
 import { desktopNodeEnvironment } from '../src/node-environment.ts'
@@ -114,6 +114,32 @@ function runPnpm(args: readonly string[]): Promise<void> {
   })
 }
 
+
+/**
+ * Delete build-only TypeScript sources from the payload.
+ *
+ * The payload runs from compiled `lib/*.js`, so `.ts` files are build inputs; they were about
+ * 32 MiB of the packed archive. This runs before the runtime descriptor is written, because
+ * that descriptor records every shipped file's digest and the packaged smoke verifies the
+ * archive against it — pruning after the fact is exactly the mismatch it refuses.
+ * @param root - Prepared `dsh` payload root.
+ * @returns How many files were removed, for the packaging log.
+ */
+function pruneTypeScriptSources(root: string): number {
+  let removed = 0
+  const walk = (directory: string): void => {
+    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      const path = join(directory, entry.name)
+      if (entry.isDirectory()) { walk(path); continue }
+      if (!entry.name.endsWith('.ts') && !entry.name.endsWith('.ts.map')) continue
+      unlinkSync(path)
+      removed++
+    }
+  }
+  walk(root)
+  return removed
+}
+
 async function main(): Promise<void> {
   try {
     console.log(`desktop runtime: pnpm store ${STORE_ROOT}`)
@@ -168,6 +194,10 @@ async function main(): Promise<void> {
       await packagingStep(process.env.DSH_DESKTOP_PACKAGING_RUN_DIR, 'sign:dsh-native', () => signMacOSRuntime(DSH_OUTPUT_ROOT, resolveDesktopAppId(process.env), resolveMacOSSigningEnvironment(process.env), target.arch, cacheDirectory))
       await packagingStep(process.env.DSH_DESKTOP_PACKAGING_RUN_DIR, 'sign:primary-native', () => signMacOSRuntime(join(RUNTIME_ROOT, 'primary-runtime'), resolveDesktopAppId(process.env), resolveMacOSSigningEnvironment(process.env), target.arch, cacheDirectory, 'primary'))
     }
+    await packagingStep(process.env.DSH_DESKTOP_PACKAGING_RUN_DIR, 'runtime:prune-sources', async () => {
+      const removed = pruneTypeScriptSources(DSH_OUTPUT_ROOT)
+      process.stdout.write(`desktop runtime: pruned ${String(removed)} TypeScript source(s)` + '\n')
+    })
     await packagingStep(process.env.DSH_DESKTOP_PACKAGING_RUN_DIR, 'runtime:manifests', () => prepareRuntimeManifests(DSH_OUTPUT_ROOT))
     await packagingStep(process.env.DSH_DESKTOP_PACKAGING_RUN_DIR, 'runtime:primary-smoke', async () => smokePrimaryRuntime(join(RUNTIME_ROOT, 'primary-runtime')))
     await packagingStep(process.env.DSH_DESKTOP_PACKAGING_RUN_DIR, 'runtime:write-descriptor', async () => {
