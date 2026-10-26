@@ -83,12 +83,13 @@ export class DesktopQuitConfirmation {
   }
 
   private async decide(): Promise<boolean> {
-    let state = await this.inspectPrompt()
+    type Inspected = Awaited<ReturnType<DesktopQuitConfirmation['inspectPrompt']>>
+    let state: Inspected = await this.inspectPrompt()
     if (this.disposed) return false
     if (!state.available || state.prompt === undefined) return true
     // Bound the loop: a task set that keeps changing is not something to quit through silently.
     for (let round = 0; round < QUIT_RECONFIRM_LIMIT; round++) {
-      const prompt = state.prompt
+      const prompt: Exclude<DesktopQuitPrompt, undefined> = state.prompt
       if (await this.ask(prompt) === false) return false
       if (this.disposed) return false
       state = await this.inspectPrompt()
