@@ -1,7 +1,7 @@
 /** Shared profile package operations used by dsh plugin and the running manager. */
 import { once } from 'node:events'
 import { existsSync, readFileSync } from 'node:fs'
-import { mkdir, mkdtemp, open, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, open, readdir, rm, stat } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { execa } from 'execa'
 import type { EntryOptions } from '@deepseek-ai/cordis-plugin-loader'
@@ -283,6 +283,25 @@ function bundleComponentManifests(manifest: ProfileManifest, dir: string, anchor
  * A compatibility denial returns exit code 1. Service output is bounded; CLI output uses inherited descriptors.
  * The diagnostic file is closed on return or rejection, including preparation and spawn failures.
  */
+/** Operation logs kept on disk; older ones are diagnostics nobody rereads. */
+const OPERATION_LOG_KEEP = 20
+
+/**
+ * Drop all but the newest {@link OPERATION_LOG_KEEP} operation directories.
+ * @param logRoot - Directory holding `operation-*` runs.
+ */
+async function pruneOperationLogs(logRoot: string): Promise<void> {
+  let entries: string[]
+  try { entries = await readdir(logRoot) } catch { return }
+  // `mkdtemp` names carry a random suffix, so age comes from the directory itself.
+  const stamped = await Promise.all(entries
+    .filter(name => name.startsWith('operation-'))
+    .map(async name => ({ name, at: await stat(join(logRoot, name)).then(found => found.mtimeMs).catch(() => 0) })))
+  await Promise.allSettled(stamped.sort((left, right) => right.at - left.at)
+    .slice(OPERATION_LOG_KEEP)
+    .map(entry => rm(join(logRoot, entry.name), { recursive: true, force: true })))
+}
+
 export async function runProfilePnpm(
   context: PackageOperationContext, args: readonly string[], options: PackageOperationOptions,
 ): Promise<PackageResult> {
@@ -291,6 +310,7 @@ export async function runProfilePnpm(
   const active = await activeRecordedRun(dir)
   const logRoot = join(dir, '.plugin-manager', 'logs')
   await mkdir(logRoot, { recursive: true, mode: 0o700 })
+  await pruneOperationLogs(logRoot)
   const logDir = await mkdtemp(join(logRoot, 'operation-'))
   const logPath = join(logDir, 'pnpm.log')
   await using log = await open(logPath, 'wx', 0o600)

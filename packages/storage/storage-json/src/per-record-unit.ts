@@ -28,7 +28,7 @@
  */
 
 import { mkdir, readFile, readdir, rename, rm } from 'node:fs/promises'
-import { dirname, join } from 'node:path'
+import { basename, dirname, join } from 'node:path'
 import type { Dirent } from 'node:fs'
 import { StorageError } from '@deepseek-ai/dsh-storage'
 import type { KvUnit, KvUnitDescriptor } from '@deepseek-ai/dsh-storage'
@@ -38,6 +38,9 @@ import type { UnitState } from './format.ts'
 
 /** Keys become path segments in this layout; this set is path-safe on every OS. */
 const SAFE_KEY_RE = /^[a-zA-Z0-9_-]+$/
+
+/** Backups kept for one record; older ones are derived data nobody reads. */
+const BACKUP_KEEP = 3
 
 /**
  * Open one `per-record`-layout unit under `root`: the unit directory is
@@ -306,7 +309,20 @@ export class PerRecordJsonUnit implements KvUnit {
     const path = join(this.tableDir(table), `${key}.json`)
     const moved = `${path}.bak.${backupStamp(new Date())}`
     await this.tracked(rename(path, moved))
+    // Recovering a record every minute would otherwise keep one backup per minute forever;
+    // the last few are enough to inspect why the schema stopped matching.
+    await this.pruneBackups(path)
     return moved
+  }
+
+  /** Keep the newest {@link BACKUP_KEEP} backups for one record and drop the rest. */
+  private async pruneBackups(path: string): Promise<void> {
+    const directory = dirname(path)
+    const prefix = `${basename(path)}.bak.`
+    let entries: string[]
+    try { entries = await readdir(directory) } catch { return }
+    const backups = entries.filter(name => name.startsWith(prefix)).sort().reverse()
+    await Promise.allSettled(backups.slice(BACKUP_KEEP).map(name => rm(join(directory, name), { force: true })))
   }
 
   /** Durably replace the global singleton. Only valid when declared. */

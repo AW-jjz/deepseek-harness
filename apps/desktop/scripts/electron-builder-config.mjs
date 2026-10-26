@@ -158,7 +158,8 @@ export function createElectronBuilderConfig(
       // Markdown stays: bundled skills read their SKILL.md at runtime.
       { from: buildPaths.dsh, to: 'dsh', filter: ['**/*', '!**/*.ts', '!**/*.ts.map'] },
       // electron-builder excludes a source directory's root node_modules.
-      { from: join(buildPaths.dsh, 'node_modules'), to: 'dsh/node_modules', filter: ['**/*'] },
+      // Same exclusions here: this second entry otherwise re-adds what the first one dropped.
+      { from: join(buildPaths.dsh, 'node_modules'), to: 'dsh/node_modules', filter: ['**/*', '!**/*.ts', '!**/*.ts.map'] },
     ],
     asarUnpack: unpack,
     extraResources: [

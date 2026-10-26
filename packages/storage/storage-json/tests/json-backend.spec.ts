@@ -1,7 +1,7 @@
 import { mkdir, mkdtemp, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterAll, describe, expect, it } from 'vitest'
+import { afterAll, describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import Storage, { storageBackendServiceKey } from '@deepseek-ai/dsh-storage'
 import { runKvBackendContract } from '../../storage/tests/contract.ts'
@@ -464,6 +464,30 @@ describe('per-record layout', () => {
     await expect(unit.backupRecord!('t', 'a/b')).rejects.toThrow(/not path-safe/)
     await unit.close()
     await expect(unit.backupRecord!('t', 'k')).rejects.toMatchObject({ code: 'closed' })
+    await backend.close()
+  })
+
+  it('keeps only the newest backups of one record', async () => {
+    // Recovering the same record every minute used to leave one backup per minute forever.
+    const root = await freshRoot()
+    const backend = new JsonStorageBackend(root)
+    const unit = await backend.kv.open(descriptor)
+    vi.useFakeTimers({ toFake: ['Date'] })
+    try {
+      for (let minute = 0; minute < 6; minute++) {
+        vi.setSystemTime(new Date(2026, 0, 1, 10, minute))
+        await unit.putRecord('t', 'k', { v: minute })
+        await unit.backupRecord!('t', 'k')
+      }
+    } finally {
+      vi.useRealTimers()
+    }
+    const directory = join(root, 'recs', 't')
+    const backups = (await readdir(directory)).filter(name => name.startsWith('k.json.bak.'))
+    expect(backups).toHaveLength(3)
+    // The newest three minutes survive; the oldest are gone.
+    expect(backups.sort()).toEqual(['k.json.bak.202601011004', 'k.json.bak.202601011003', 'k.json.bak.202601011005'].sort())
+    await unit.close()
     await backend.close()
   })
 
