@@ -445,3 +445,14 @@
   margin: 0;
   width: max-content;
 }
+
+/* Recovery banner: sticky at the bottom of the transcript so a stalled turn always shows it. */
+.connectionRow {
+  position: sticky;
+  bottom: 0;
+  z-index: 5;
+  display: flex;
+  justify-content: center;
+  padding: 6px 0;
+  pointer-events: auto;
+}

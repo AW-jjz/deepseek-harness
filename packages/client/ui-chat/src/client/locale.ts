@@ -5,6 +5,11 @@ export const NS = 'chat'
 
 /** Simplified Chinese dictionary and key-set source of truth. */
 export const zh = {
+  'connection.disconnected': '连接已断开，点击重连',
+  'connection.connecting': '正在重新连接',
+  'connection.recovered': '已重新连接',
+  'connection.reconnect': '重新连接',
+  'connection.restart': '重新开始连接',
   'message.stepProcess.thinking': '正在分析请求',
   'message.stepProcess.read': '正在读取文件',
   'message.stepProcess.readImage': '正在读取图片',
@@ -207,6 +212,11 @@ export type ChatKey = keyof typeof zh
 
 /** English dictionary, checked against the Chinese key set. */
 export const en = {
+  'connection.disconnected': 'Connection lost — click to reconnect',
+  'connection.connecting': 'Reconnecting',
+  'connection.recovered': 'Reconnected',
+  'connection.reconnect': 'Reconnect',
+  'connection.restart': 'Restart connection',
   'message.stepProcess.thinking': 'Analyzing the request',
   'message.stepProcess.read': 'Reading files',
   'message.stepProcess.readImage': 'Reading images',
@@ -406,6 +416,11 @@ export const en = {
 
 /** Japanese copy, checked against the English keys. */
 export const ja = {
+  'connection.disconnected': '接続が切れました。クリックして再接続',
+  'connection.connecting': '再接続中',
+  'connection.recovered': '再接続しました',
+  'connection.reconnect': '再接続',
+  'connection.restart': '接続をやり直す',
   'message.stepProcess.thinking': 'リクエストを分析中',
   'message.stepProcess.read': 'ファイルを読み取り中',
   'message.stepProcess.readImage': '画像を読み取り中',
@@ -605,6 +620,11 @@ export const ja = {
 
 /** Spanish dictionary, checked against the English keys. */
 export const es = {
+  'connection.disconnected': 'Conexión perdida: haz clic para reconectar',
+  'connection.connecting': 'Reconectando',
+  'connection.recovered': 'Reconectado',
+  'connection.reconnect': 'Reconectar',
+  'connection.restart': 'Reiniciar conexión',
   'message.stepProcess.thinking': 'Analizando la solicitud',
   'message.stepProcess.read': 'Leyendo archivos',
   'message.stepProcess.readImage': 'Leyendo imágenes',
@@ -804,6 +824,11 @@ export const es = {
 
 /** French dictionary, checked against the English keys. */
 export const fr = {
+  'connection.disconnected': 'Connexion perdue — cliquez pour reconnecter',
+  'connection.connecting': 'Reconnexion',
+  'connection.recovered': 'Reconnecté',
+  'connection.reconnect': 'Reconnecter',
+  'connection.restart': 'Redémarrer la connexion',
   'message.stepProcess.thinking': 'Analyser la demande',
   'message.stepProcess.read': 'Lecture de fichiers',
   'message.stepProcess.readImage': 'Lire des images',
@@ -1003,6 +1028,11 @@ export const fr = {
 
 /** German dictionary, checked against the English keys. */
 export const de = {
+  'connection.disconnected': 'Verbindung getrennt – zum Neuverbinden klicken',
+  'connection.connecting': 'Verbindung wird wiederhergestellt',
+  'connection.recovered': 'Wieder verbunden',
+  'connection.reconnect': 'Neu verbinden',
+  'connection.restart': 'Verbindung neu starten',
   'message.stepProcess.thinking': 'Analyse der Anfrage',
   'message.stepProcess.read': 'Dateien lesen',
   'message.stepProcess.readImage': 'Bilder lesen',
@@ -1202,6 +1232,11 @@ export const de = {
 
 /** Russian dictionary, checked against the English keys. */
 export const ru = {
+  'connection.disconnected': 'Соединение потеряно — нажмите, чтобы переподключиться',
+  'connection.connecting': 'Переподключение',
+  'connection.recovered': 'Соединение восстановлено',
+  'connection.reconnect': 'Переподключиться',
+  'connection.restart': 'Перезапустить соединение',
   'message.stepProcess.thinking': 'Анализ запроса',
   'message.stepProcess.read': 'Чтение файлов',
   'message.stepProcess.readImage': 'Чтение изображений',
@@ -1401,6 +1436,11 @@ export const ru = {
 
 /** Portuguese dictionary, checked against the English keys. */
 export const pt = {
+  'connection.disconnected': 'Conexão perdida — clique para reconectar',
+  'connection.connecting': 'Reconectando',
+  'connection.recovered': 'Reconectado',
+  'connection.reconnect': 'Reconectar',
+  'connection.restart': 'Reiniciar conexão',
   'message.stepProcess.thinking': 'Analisando a solicitação',
   'message.stepProcess.read': 'Lendo arquivos',
   'message.stepProcess.readImage': 'Lendo imagens',

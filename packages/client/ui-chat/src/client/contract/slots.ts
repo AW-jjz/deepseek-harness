@@ -339,6 +339,8 @@ export type ChatFlowDataInjected = Pick<ChatViewInjected, 'keyedHooks'> & {
     /** Client connection lifecycle; the running clock pauses while it is not connected. */
     connectionState: ConnectionStateSource
   }
+  /** Request an immediate reconnect attempt for the banner's action. */
+  reconnect: () => void
 }
 
 /** Ordered rows and reconciled local echoes rendered inside one Chat viewport. */

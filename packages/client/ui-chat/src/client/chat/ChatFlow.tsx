@@ -4,6 +4,7 @@ import type { PendingSubmission } from '@deepseek-ai/dsh-api-session-controller/
 import { assertNever } from '@deepseek-ai/dsh-util-values'
 import type { ChatFlowSlotProps } from '../contract/slots.ts'
 import { ChatNodeSeat } from './ChatNodeSeat.tsx'
+import { ConnectionBanner } from './ConnectionBanner.tsx'
 import { ChatGroupSeat } from './ChatGroupSeat.tsx'
 import { PendingSteeringBubble, PendingSubmissionBubble } from './MessageItem.tsx'
 import { chatRenderKey } from './render-entry.ts'
@@ -26,12 +27,13 @@ function isTranscriptEcho(item: PendingInput): boolean {
 export const ChatFlow = memo(function ChatFlow({
   entries, pendingInputs, lastInputTurn, deferCollapse,
   useSession, useChat, useChatNode, useChatNodeBottom, useChatNodeProcess, useChatGroup, usePresentation, useConnectionState,
-  useStore, actions, renderSlot, renderFactorySlot, t, useGroupAction, useGroupHeaderAction,
+  useStore, actions, renderSlot, renderFactorySlot, t, useGroupAction, useGroupHeaderAction, reconnect,
   cwd, openFile, inspectCall, forkAt, loadImage, fileMentions,
 }: ChatFlowSlotProps) {
   const nodeStore = useChat(snapshot => snapshot.nodes)
   const running = useSession(snapshot => snapshot.running)
   const disconnected = useConnectionState(state => state === 'disconnected' || state === 'connecting')
+  const connectionState = useConnectionState(state => state)
   const latestTurnAnchor = useChat(snapshot => snapshot.navigation.items().at(-1)?.anchorKey)
   const runningStartTime = useChatNode(latestTurnAnchor ?? '', (node) => {
     const location = node?.location
@@ -88,5 +90,7 @@ export const ChatFlow = memo(function ChatFlow({
     ...rows, ...leadingRows, ...openingRows,
     ...running ? [<RunningStatus key="running" startTime={runningStartTime} paused={disconnected} t={t} />] : [],
     ...pendingRows,
+    // Last, so it sits where the user is looking while a turn stalls.
+    <ConnectionBanner key="connection" state={connectionState} reconnect={reconnect} t={t} />,
   ]
 })

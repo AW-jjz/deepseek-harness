@@ -205,7 +205,8 @@ export function apply(ctx: Context): void {
     }),
   }, TranscriptViewRow))
 
-  const connectionState = (ctx.get('connection') as ConnectionHandle).state
+  const connectionHandle = ctx.get('connection') as ConnectionHandle
+  const connectionState = connectionHandle.state
   const nodeSources = (binding: SessionBinding): Pick<ChatViewInjected, 'keyedHooks'> => {
     const chat = chatSource(binding)
     const conversation = ctx.uiConversation.binding(binding)
@@ -227,7 +228,11 @@ export function apply(ctx: Context): void {
     inject: (sessionId: SessionId): ChatFlowDataInjected => {
       const binding = ctx.sessions.binding(sessionId)
       if (binding === undefined) throw new Error(`ui-chat: unknown session "${sessionId}"`)
-      return { ...nodeSources(binding), hooks: { presentation, connectionState } }
+      return {
+        ...nodeSources(binding),
+        hooks: { presentation, connectionState },
+        reconnect: () => { connectionHandle.reconnect() },
+      }
     },
   }, ChatFlow))
 
