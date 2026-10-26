@@ -543,14 +543,25 @@ describe('desktop main startup', () => {
     expect((await handler(new Request('dsh-app://unknown/update-dialog.html'))).status).toBe(404)
   })
 
-  it('installs hidden native DevTools shortcuts in the macOS application menu', async () => {
+  it('installs hidden native DevTools shortcuts in the development application menu', async () => {
     vi.stubGlobal('process', { ...process, platform: 'darwin' })
+    harness.app.isPackaged = false
     await readyForUpdate()
     expect(applicationMenuItems().slice(-2)).toEqual([
       { role: 'toggleDevTools', visible: false },
       { role: 'toggleDevTools', visible: false, accelerator: 'F12' },
     ])
     expect(harness.windows[0]!.options).toMatchObject({ webPreferences: { devTools: true } })
+  })
+
+  it('leaves DevTools out of a packaged build', async () => {
+    // A packaged window cannot open DevTools from the menu or from F12, and the web contents
+    // start with DevTools disabled.
+    vi.stubGlobal('process', { ...process, platform: 'darwin' })
+    harness.app.isPackaged = true
+    await readyForUpdate()
+    expect(applicationMenuItems()).not.toContainEqual(expect.objectContaining({ role: 'toggleDevTools' }))
+    expect(harness.windows[0]!.options).toMatchObject({ webPreferences: { devTools: false } })
   })
 
   it.each([
@@ -848,6 +859,9 @@ describe('desktop main startup', () => {
 
   it.each(['darwin', 'win32', 'linux'] as const)('limits native titlebar styling to macOS on %s', async (platform) => {
     vi.spyOn(process, 'platform', 'get').mockReturnValue(platform)
+    // Development menus carry the hidden DevTools accelerators; the packaged shape is
+    // covered by its own test.
+    harness.app.isPackaged = false
     await import('../src/main.ts')
     await harness.preparing.promise
     const window = harness.windows[0]!

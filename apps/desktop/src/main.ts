@@ -79,6 +79,13 @@ let sessionEnding = false
  */
 let skipQuitConfirmation = false
 let windowsLanguage: string | undefined
+
+/**
+ * DevTools in a packaged build would let anyone at the machine evaluate script in the
+ * application origin and drive the preload-exposed IPC surface. Development keeps them on,
+ * and a support session can ask for them explicitly with `DSH_DESKTOP_DEVTOOLS=1`.
+ */
+const devToolsAvailable = (): boolean => !app.isPackaged || process.env.DSH_DESKTOP_DEVTOOLS === '1'
 /**
  * Whether the backend has reached ready: false until the first ready, back to
  * false when a restart returns it to starting, frozen during shutdown so a
@@ -244,7 +251,7 @@ function createWindow(preload: string, show = false, primary = false): BrowserWi
       sandbox: true,
       webSecurity: true,
       webviewTag: primary,
-      devTools: true,
+      devTools: devToolsAvailable(),
     },
   })
   window.webContents.setWindowOpenHandler(({ url }) => {
@@ -1006,10 +1013,12 @@ async function main(): Promise<void> {
     { role: 'quit', ...(darwin ? { label: currentDesktopLocale().messages.quitApplication }
       : process.platform === 'win32' ? { label: currentDesktopLocale().messages.exitApplication } : {}) },
   ]
-  const devToolsItems: MenuItemConstructorOptions[] = [
+  // The hidden role items exist for their accelerators; a packaged build without a diagnostic
+  // session installs none, so F12 cannot open DevTools.
+  const devToolsItems: MenuItemConstructorOptions[] = devToolsAvailable() ? [
     { role: 'toggleDevTools', visible: false },
     { role: 'toggleDevTools', visible: false, accelerator: 'F12' },
-  ]
+  ] : []
   const refreshApplicationMenu = (): void => {
     Menu.setApplicationMenu(Menu.buildFromTemplate(process.platform === 'win32' ? devToolsItems : [{
       label: darwin ? app.name : currentDesktopLocale().messages.application,

@@ -14,6 +14,19 @@ function fixture(platform: NodeJS.Platform = 'darwin') {
   installMicrophonePermissions({ setPermissionCheckHandler, setPermissionRequestHandler }, () => primary)
   return { primary, check: setPermissionCheckHandler.mock.calls[0]![0]!, request: setPermissionRequestHandler.mock.calls[0]![0]! }
 }
+it.each([
+  'clipboard-read', 'notifications', 'geolocation', 'midi', 'midiSysex', 'hid', 'serial', 'usb',
+  'display-capture', 'speaker-selection', 'window-management', 'unknown',
+] as const)('denies %s instead of leaving Electron\'s default', (permission) => {
+  // The default session also carries the welcome page, update dialogs and policy pages; a
+  // document injected into any of them must not gain these without a prompt.
+  const f = fixture(), done = vi.fn()
+  const details = { isMainFrame: true, mediaType: 'audio' as const }
+  expect(f.check(f.primary, permission, 'dsh-app://app', details)).toBe(false)
+  f.request(f.primary, permission, done, { isMainFrame: true, requestingUrl: 'dsh-app://app/', mediaTypes: ['audio'] })
+  expect(done).toHaveBeenLastCalledWith(false)
+})
+
 it('allows only audio checks from the owned primary application frame', () => {
   const f = fixture(), details = { isMainFrame: true, mediaType: 'audio' as const }
   expect(f.check(f.primary, 'media', 'dsh-app://app', details)).toBe(true)
