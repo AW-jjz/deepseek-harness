@@ -35,6 +35,7 @@ export const es = {
   'expand': 'Expandir',
   'back': 'Atrás',
   'brand.localBuild': 'Compilación local de DSH',
+  'a11y.skipToContent': 'Saltar al contenido principal',
   'workspace.defaultName': 'Espacio de trabajo predeterminado',
   'unknown': 'Desconocido',
   'none': 'Ninguno',

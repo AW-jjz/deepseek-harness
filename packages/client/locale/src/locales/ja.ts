@@ -35,6 +35,7 @@ export const ja = {
   'expand': '展開',
   'back': '戻る',
   'brand.localBuild': 'DSHローカルビルド',
+  'a11y.skipToContent': 'メインコンテンツへスキップ',
   'workspace.defaultName': 'デフォルトワークスペース',
   'unknown': '不明',
   'none': 'なし',

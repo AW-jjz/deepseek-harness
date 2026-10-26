@@ -35,6 +35,7 @@ export const fr = {
   'expand': 'Développer',
   'back': 'Retour',
   'brand.localBuild': 'Version locale de DSH',
+  'a11y.skipToContent': 'Aller au contenu principal',
   'workspace.defaultName': 'Espace de travail par défaut',
   'unknown': 'Inconnu',
   'none': 'Aucun',

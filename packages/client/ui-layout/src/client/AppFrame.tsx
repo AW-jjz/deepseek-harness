@@ -31,9 +31,9 @@ export type AppFrameProps =
   & PropsStore<ReturnType<typeof createLayoutStore>>
   & PropsLocale<'common'>
 
-/** Center column grid item (session-body building block). */
+/** Center column grid item and the page's main landmark; the skip link targets it. */
 function CenterColumn(props: { children?: ReactNode }) {
-  return <div className={css.centerCol}>{props.children}</div>
+  return <main id="dsh-main" tabIndex={-1} className={css.centerCol}>{props.children}</main>
 }
 
 /** Subscribe to the main key without subscribing the column frame to each panel id. */
@@ -277,9 +277,11 @@ export function AppFrame({
         useSessions={useSessions}
         usePanelInfo={usePanelInfo}
       />
-      <div className={css.sidebarCol}>
+      {/* Keyboard users land here first: one keypress skips the sidebar and session tree. */}
+      <a className={css.skipLink} href="#dsh-main">{t('a11y.skipToContent')}</a>
+      <aside className={css.sidebarCol}>
         {sidebar}
-      </div>
+      </aside>
       <>
         <CenterColumn>{main}</CenterColumn>
         <RightbarColumn>

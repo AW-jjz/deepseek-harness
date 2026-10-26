@@ -32,6 +32,7 @@ export const zh = {
   'expand': '展开',
   'back': '返回',
   'brand.localBuild': 'DSH 本地构建',
+  'a11y.skipToContent': '跳到主要内容',
   'workspace.defaultName': '默认工作区',
   'unknown': '未知',
   'none': '无',

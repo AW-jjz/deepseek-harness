@@ -438,6 +438,18 @@ describe('AppFrame right panel presentation', () => {
     expect(frame.dataset.animating).toBeUndefined()
   })
 
+  it('exposes the main and sidebar landmarks plus a skip link that targets the main column', () => {
+    const { container, getByRole } = mountFrame()
+    const main = getByRole('main')
+    expect(main.id).toBe('dsh-main')
+    // Programmatic focus lands in the main column without adding it to the tab order.
+    expect(main.getAttribute('tabindex')).toBe('-1')
+    expect(getByRole('complementary')).toBeTruthy()
+    const skip = container.querySelector('a[href="#dsh-main"]')
+    expect(skip).not.toBeNull()
+    expect(skip!.textContent).toBe('a11y.skipToContent')
+  })
+
   it('lands the responsive auto-collapse instantly, keeping user toggles eased', () => {
     const { frame, instance } = mountFrame()
     // Shrinking across the breakpoint flips the collapse in the same update as
