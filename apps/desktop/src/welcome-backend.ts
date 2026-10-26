@@ -34,10 +34,23 @@ function record(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
+/** Deadline for one welcome RPC; a slow Host surfaces as a readable failure instead of a frozen screen. */
+export const WELCOME_RPC_TIMEOUT_MS = 5_000
+
+/** Authentication attempts before the welcome screen reports a failure. */
+export const WELCOME_AUTH_ATTEMPTS = 3
+
+/** Delay before each retry, so a Host that is still binding its listener can answer. */
+const WELCOME_AUTH_RETRY_MS = [1_000, 2_000] as const
+
 /**
  * Authenticate the native HTTP client through the Web application's launch URL.
+ *
+ * The exchange happens before the welcome screen can render, so a transient 503 or a slow
+ * Host must be retried rather than turned into a fatal startup failure on the first try.
  * @param authenticatedUrl - URL supplied by the running Desktop Host.
  * @param send - Electron session fetch, retaining the Web authentication cookie.
+ * @param cookies - Reads the cookie jar the welcome document shares.
  * @returns metadata reads and write-only credential operations over standard RPC.
  */
 export async function connectDesktopWelcome(
@@ -46,9 +59,27 @@ export async function connectDesktopWelcome(
   cookies: () => Promise<string> = () => Promise.resolve(''),
 ): Promise<DesktopWelcomeBackend> {
   const origin = new URL(authenticatedUrl).origin
-  const authenticated = await send(authenticatedUrl, { credentials: 'include' })
-  await authenticated.body?.cancel()
-  if (!authenticated.ok) throw new Error('desktop welcome: Web authentication failed')
+  const authenticate = async (): Promise<void> => {
+    let lastError: unknown
+    for (let attempt = 0; attempt < WELCOME_AUTH_ATTEMPTS; attempt++) {
+      if (attempt > 0) await new Promise(resolve => setTimeout(resolve, WELCOME_AUTH_RETRY_MS[attempt - 1] ?? 0))
+      let response: Response
+      try {
+        response = await send(authenticatedUrl, { credentials: 'include', signal: AbortSignal.timeout(WELCOME_RPC_TIMEOUT_MS) })
+      } catch (error) {
+        // A transport failure can be the listener still binding; retry it within the budget.
+        lastError = error
+        continue
+      }
+      await response.body?.cancel()
+      // A rejected credential is not transient; retrying it would only delay the error.
+      if (response.status === 401 || response.status === 403) throw new Error('desktop welcome: Web authentication failed')
+      if (response.ok) return
+      lastError = new Error(`desktop welcome: Web authentication failed (${String(response.status)})`)
+    }
+    throw lastError instanceof Error ? lastError : new Error('desktop welcome: Web authentication failed')
+  }
+  await authenticate()
   const invoke = async (
     request: { namespace: string; method: string; args: Record<string, unknown> },
     signal?: AbortSignal,
@@ -56,7 +87,8 @@ export async function connectDesktopWelcome(
     const rpcId = randomUUID()
     const method = `${request.namespace}/${request.method}`
     const response = await send(new URL(`/api/${method}`, origin).href, {
-      method: 'POST', credentials: 'include', redirect: 'error', ...(signal === undefined ? {} : { signal }),
+      method: 'POST', credentials: 'include', redirect: 'error',
+      signal: signal ?? AbortSignal.timeout(WELCOME_RPC_TIMEOUT_MS),
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ type: 'client-request', rpcId, method, payload: { args: request.args } }),
     })

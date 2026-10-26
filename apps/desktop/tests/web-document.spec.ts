@@ -35,6 +35,18 @@ it('requires the Host authentication exchange and retains only its cookie value'
   await expect(authenticateWebHost('http://127.0.0.1:1234/')).rejects.toThrow('authentication failed')
 })
 
+it('gives the Host authentication exchange a deadline instead of hanging startup', async () => {
+  // A Host that accepted the connection but never answers must not keep the window on the
+  // boot screen forever; the request carries an abort signal bounded by the deadline.
+  const fetch = vi.fn((_url: string, init?: RequestInit) => new Promise<Response>((_resolve, reject) => {
+    init?.signal?.addEventListener('abort', () => { reject(init.signal?.reason as Error) })
+  }))
+  vi.stubGlobal('fetch', fetch)
+  await expect(authenticateWebHost('http://127.0.0.1:1234/?token=owned', 20))
+    .rejects.toThrow(/timed out|aborted|The operation was aborted/u)
+  expect(fetch.mock.calls[0]?.[1]?.signal).toBeInstanceOf(AbortSignal)
+})
+
 it('forwards upload bytes and cancellation with Host credentials while keeping the response streaming', async () => {
   const body = new ReadableStream({ start(controller) { controller.enqueue(new TextEncoder().encode('stream')); controller.close() } })
   const fetch = vi.fn().mockResolvedValue(new Response(body, { headers: { 'content-encoding': 'gzip', 'set-cookie': 'private' } }))

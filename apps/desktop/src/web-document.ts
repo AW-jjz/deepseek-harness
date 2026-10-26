@@ -9,6 +9,9 @@ const MIME: Readonly<Record<string, string>> = {
 }
 const BOOT = '<script>globalThis.__DSH_BOOT_READY__ = Promise.withResolvers()</script>'
 
+/** Deadline for the Host authentication exchange; the window cannot open before it finishes. */
+export const AUTHENTICATION_TIMEOUT_MS = 5_000
+
 /**
  * Read an application-owned static asset; the index waits for asynchronous Host injections.
  * @param request - Local application request.
@@ -37,11 +40,16 @@ export async function serveWebDocument(request: Request, root: string): Promise<
 
 /**
  * Exchange the Host launch URL for an authority-bound browser cookie.
+ *
+ * The exchange runs before the window may show the application, so a Host that accepts the
+ * connection but never answers would otherwise leave startup waiting forever with no state
+ * the shell can report. The deadline turns that into a startup failure with a message.
  * @param url - Authenticated URL reported by the owned Host process.
+ * @param timeoutMs - Deadline for the whole exchange; defaults to {@link AUTHENTICATION_TIMEOUT_MS}.
  * @returns Cookie header for requests forwarded to that Host.
  */
-export async function authenticateWebHost(url: string): Promise<string> {
-  const response = await fetch(url, { redirect: 'manual' })
+export async function authenticateWebHost(url: string, timeoutMs = AUTHENTICATION_TIMEOUT_MS): Promise<string> {
+  const response = await fetch(url, { redirect: 'manual', signal: AbortSignal.timeout(timeoutMs) })
   const cookie = response.headers.get('set-cookie')
   await response.body?.cancel()
   if (response.status !== 303 || cookie === null) throw new Error('Desktop Host authentication failed')

@@ -35,7 +35,7 @@ describe('desktop welcome Web operations', () => {
   it('authenticates through Web and stores only through the configured credential reference', async () => {
     const host = transport()
     const backend = await connectDesktopWelcome(url, host.send)
-    expect(host.send).toHaveBeenCalledExactlyOnceWith(url, { credentials: 'include' })
+    expect(host.send).toHaveBeenCalledExactlyOnceWith(url, { credentials: 'include', signal: expect.any(AbortSignal) as unknown as AbortSignal })
     expect(await backend.analyticsEnabled()).toBe(true)
     expect(await backend.save('sk-example')).toEqual({ ok: true })
     expect(host.keys.get('CUSTOM_DEEPSEEK_KEY')).toBe('sk-example')
@@ -56,8 +56,32 @@ describe('desktop welcome Web operations', () => {
     expect(host.send.mock.calls.every(([, init]) => !(init?.body as string | undefined)?.includes('credentials/set'))).toBe(true)
   })
 
-  it('reads language without querying account or model providers', async () => {
-    const host = transport('zh')
+  it('retries a transient authentication failure but not a rejected credential', async () => {
+    const host = transport()
+    const authenticate = host.send.getMockImplementation()!
+    let attempts = 0
+    host.send.mockImplementation((input: string, init?: RequestInit) => {
+      if (input !== url) return authenticate(input, init)
+      attempts++
+      // First attempt looks like a Host still binding its listener; the second succeeds.
+      return Promise.resolve(attempts === 1
+        ? new Response(null, { status: 503 })
+        : new Response(null, { status: 200 }))
+    })
+    await expect(connectDesktopWelcome(url, host.send)).resolves.toBeDefined()
+    expect(attempts).toBe(2)
+    host.send.mockClear()
+    let rejected = 0
+    host.send.mockImplementation((input: string, init?: RequestInit) => {
+      if (input !== url) return authenticate(input, init)
+      rejected++
+      return Promise.resolve(new Response(null, { status: 401 }))
+    })
+    await expect(connectDesktopWelcome(url, host.send)).rejects.toThrow('authentication failed')
+    expect(rejected).toBe(1)
+  })
+
+  it('reads language without querying account or model providers', async () => {    const host = transport('zh')
     const backend = await connectDesktopWelcome(url, host.send)
     host.send.mockClear()
     expect(await backend.readLocalePreference()).toBe('zh')
