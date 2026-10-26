@@ -2,8 +2,8 @@ import { Context } from '@deepseek-ai/cordis'
 import { JobId, JobRegistry } from '@deepseek-ai/dsh-jobs'
 import type { JobStatus, JobView } from '@deepseek-ai/dsh-jobs'
 import { SessionId } from '@deepseek-ai/dsh-session/types'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { installDesktopUpdateTaskControl } from '../src/update-tasks.ts'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { DRAIN_BUDGET_MS, LOCK_STALE_MS, installDesktopUpdateTaskControl } from '../src/update-tasks.ts'
 
 type AgentState = { id: SessionId; status: 'idle' | 'running'; inbox: { nextTurn: object[]; nextStep: object[] } }
 
@@ -62,6 +62,38 @@ describe('Desktop Host update task control', () => {
   it('refuses control after disposal', async () => {
     await ctx.fiber.dispose()
     await expect(control('inspect')).rejects.toThrow('Host is stopping')
+  })
+
+  it('abandons a drain that outlives its budget instead of holding the lock forever', async () => {
+    vi.useFakeTimers()
+    try {
+      const hanging = new Promise<never>(() => {})
+      const response = { writeHead: vi.fn(), end: vi.fn() }
+      // Admit one request that never finishes; the lock must stop waiting at its budget.
+      ctx.emit('connection/request', {}, response, () => hanging)
+      const locking = expect(control('lock')).rejects.toThrow(/did not finish draining/u)
+      await vi.advanceTimersByTimeAsync(DRAIN_BUDGET_MS)
+      await locking
+      // The shell unlocks on failure; a later request must be served, not answered 503.
+      await control('unlock')
+      ctx.emit('connection/request', {}, response, () => Promise.resolve())
+      expect(response.writeHead).not.toHaveBeenCalledWith(503)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('releases a lock nobody unlocks so the API cannot wedge at 503', async () => {
+    vi.useFakeTimers()
+    try {
+      expect(await control('lock')).toBe(false)
+      await vi.advanceTimersByTimeAsync(LOCK_STALE_MS)
+      const response = { writeHead: vi.fn(), end: vi.fn() }
+      ctx.emit('connection/request', {}, response, () => Promise.resolve())
+      expect(response.writeHead).not.toHaveBeenCalledWith(503)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('survives registration on a context that is already unloading and fails closed', async () => {

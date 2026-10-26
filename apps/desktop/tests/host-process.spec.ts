@@ -156,6 +156,29 @@ describe('desktop host process', () => {
     await expect(host.stop()).resolves.toBeUndefined()
   })
 
+  it('still decides a strong handoff when a weak stop already tore the child down', async () => {
+    // The update path asks after a quit may already have stopped the Host: the weak call must
+    // not consume the verdict, or the installer would replace the app over a half-stopped Host.
+    const host = hostProcess(projectWithHost(`
+      process.send({ type: 'ready', url: 'http://127.0.0.1:3080/' })
+      process.on('message', message => {
+        if (message.type === 'shutdown') process.exit(0)
+      })
+    `))
+    await host.start()
+    await expect(host.stop()).resolves.toBeUndefined()
+    const error = await host.stop(true).then(() => undefined, (error: unknown) => error)
+    expect(error).toBeInstanceOf(DesktopHostUncleanExitError)
+    expect(String(error)).toContain('shutdown acknowledged false')
+  })
+
+  it('passes a clean handoff when teardown acknowledged shutdown', async () => {
+    const host = hostProcess(projectWithHost())
+    await host.start()
+    await host.stop()
+    await expect(host.stop(true)).resolves.toBeUndefined()
+  })
+
   it('returns the Web authentication URL and waits for graceful shutdown', async () => {
     const runtime = projectWithHost()
     const failure = vi.fn()
@@ -241,6 +264,29 @@ describe('desktop host process', () => {
   ])('rejects startup when the child fails before readiness: %s', async (source, message) => {
     const host = hostProcess(projectWithHost(source))
     await expect(host.start()).rejects.toThrow(message)
+  })
+
+  it.each([
+    'http://192.0.2.1:4321/',
+    'https://evil.example/',
+    'http://127.0.0.1.evil.example:4321/',
+    'file:///C:/Windows/System32/',
+    'http://user:secret@127.0.0.1:4321/',
+  ])('refuses a ready event whose URL is not this machine: %s', async (url) => {
+    // The shell forwards its Host cookie and API traffic to this origin, so anything but a
+    // credential-free loopback endpoint is an invalid IPC event and terminates the child.
+    const host = hostProcess(projectWithHost(`process.send({ type: 'ready', url: ${JSON.stringify(url)} })`))
+    await expect(host.start()).rejects.toThrow('invalid IPC event')
+  })
+
+  it.each([
+    'http://127.0.0.1:4321/?token=abc',
+    'http://localhost:4321/',
+    'https://127.0.0.1:4321/',
+  ])('accepts a loopback ready URL: %s', async (url) => {
+    const host = hostProcess(projectWithHost(`process.send({ type: 'ready', url: ${JSON.stringify(url)} }, () => {})`))
+    hosts.push(host)
+    await expect(host.start()).resolves.toMatchObject({ url })
   })
 
   it('keeps the Host\'s inspected error separate from the message it reports', async () => {

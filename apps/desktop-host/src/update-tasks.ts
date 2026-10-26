@@ -20,6 +20,12 @@ export function hasDesktopActiveTasks(liveAgents: ReturnType<Context['agents']['
       .some(job => job.status === 'running' || job.status === 'stopping'))
 }
 
+/** How long admitted requests may keep the lock before the drain is abandoned. */
+export const DRAIN_BUDGET_MS = 5_000
+
+/** How long a lock may stay held before it releases itself, so the API cannot wedge at 503. */
+export const LOCK_STALE_MS = 30_000
+
 /**
  * Register update admission on the owning Host context.
  * @param ctx - Booted Desktop profile context; disposal removes the request listener.
@@ -27,12 +33,22 @@ export function hasDesktopActiveTasks(liveAgents: ReturnType<Context['agents']['
  */
 export function installDesktopUpdateTaskControl(ctx: Context): (action: 'inspect' | 'lock' | 'unlock') => Promise<boolean> {
   let locked = false
+  let lockedAt: number | undefined
   let lockGeneration = 0
   let stopped = false
+  let staleLockTimer: NodeJS.Timeout | undefined
   const pendingRequests = new Set<Promise<void>>()
+  const releaseLock = (): void => {
+    locked = false
+    lockedAt = undefined
+    if (staleLockTimer !== undefined) { clearTimeout(staleLockTimer); staleLockTimer = undefined }
+  }
   try {
     ctx.effect(() => () => { stopped = true })
+    ctx.effect(() => () => { releaseLock() })
     ctx.on('connection/request', async (_request, response, next) => {
+      // A lock nobody releases must not turn every API response into a permanent 503.
+      if (locked && lockedAt !== undefined && Date.now() - lockedAt >= LOCK_STALE_MS) releaseLock()
       if (locked) {
         response.writeHead(503)
         response.end()
@@ -50,18 +66,38 @@ export function installDesktopUpdateTaskControl(ctx: Context): (action: 'inspect
     stopped = true
     ctx.logger('desktop-update').warn('update task control skipped registration on a disposing Host context')
   }
+  /** Wait for admitted requests, but never longer than {@link DRAIN_BUDGET_MS}. */
+  const drainAdmittedRequests = async (): Promise<boolean> => {
+    if (pendingRequests.size === 0) return true
+    let timer: NodeJS.Timeout | undefined
+    const budget = new Promise<false>((resolve) => {
+      timer = setTimeout(() => { resolve(false) }, DRAIN_BUDGET_MS)
+      timer.unref()
+    })
+    try {
+      return await Promise.race([Promise.all(pendingRequests).then(() => true), budget])
+    } finally {
+      if (timer !== undefined) clearTimeout(timer)
+    }
+  }
   return async (action) => {
     if (stopped) throw new Error('desktop update: Host is stopping')
-    if (action === 'unlock') { locked = false; lockGeneration++ }
+    if (action === 'unlock') { releaseLock(); lockGeneration++ }
     const agents = ctx.get('agents')
     const jobs = ctx.get('jobs')
     if (agents === undefined || jobs === undefined) throw new Error('desktop update: task services are unavailable')
     if (action === 'lock') {
       locked = true
+      lockedAt = Date.now()
+      if (staleLockTimer !== undefined) clearTimeout(staleLockTimer)
+      staleLockTimer = setTimeout(() => { releaseLock() }, LOCK_STALE_MS)
+      staleLockTimer.unref()
       const generation = ++lockGeneration
       // Read requests are not tasks; admitted writes must finish before the final work check.
-      await Promise.all(pendingRequests)
-      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- Disposal can run while admitted requests drain.
+      // An unbounded drain would leave the lock (and every API response) waiting forever.
+      if (!await drainAdmittedRequests()) {
+        throw new Error(`desktop update: admitted requests did not finish draining within ${String(DRAIN_BUDGET_MS)}ms`)
+      }
       if (stopped) throw new Error('desktop update: Host is stopping')
       if (generation !== lockGeneration) throw new Error('desktop update: admission lock was superseded')
     }

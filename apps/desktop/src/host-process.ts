@@ -4,6 +4,7 @@ import { spawn, type ChildProcess } from 'node:child_process'
 import { join } from 'node:path'
 import type { PlatformSession } from '@deepseek-ai/dsh-deepseek-account'
 import { desktopNodeEnvironment } from './node-environment.ts'
+import { loopbackOrigin } from './host-origin.ts'
 
 interface ReadyEvent {
   readonly type: 'ready'
@@ -62,7 +63,9 @@ function isDesktopHostEvent(message: unknown): message is DesktopHostEvent {
     case 'shutdown-complete':
       return true
     case 'ready':
-      return typeof candidate.url === 'string'
+      // The URL decides where the shell sends its Host cookie and API traffic; a value that
+      // does not name this machine is treated as an invalid IPC event and terminates the child.
+      return typeof candidate.url === 'string' && loopbackOrigin(candidate.url) !== undefined
     case 'platform-session': {
       const session = candidate.session
       if (session === null) return true
@@ -124,6 +127,14 @@ export interface DesktopHostReady {
 /** The child has exited, but task teardown did not finish successfully. */
 export class DesktopHostUncleanExitError extends Error {}
 
+/** What one teardown achieved, retained so a later strong stop can judge it. */
+interface DesktopHostStopOutcome {
+  readonly graceful: boolean
+  readonly exitCode: number | null
+  readonly signalCode: NodeJS.Signals | null
+  readonly shutdownCompleted: boolean
+}
+
 /**
  * A Host failure reported over IPC before the process exited. `message` is what
  * the Host chose to show; `diagnostic` is its complete inspected error, kept
@@ -160,6 +171,8 @@ export class DesktopHostProcess {
   private failureReported = false
   private stopping = false
   private shutdownCompleted = false
+  private stopPromise: Promise<void> | undefined
+  private stopOutcome: DesktopHostStopOutcome | undefined
   private nextControlId = 1
   private readonly controlRequests = new Map<number, {
     resolve: (response: DesktopHostControlResponse) => void
@@ -322,11 +335,28 @@ export class DesktopHostProcess {
 
   /**
    * Request teardown and await child exit, escalating termination when needed.
+   *
+   * Teardown runs once and its outcome is retained, so a strong request that arrives after a
+   * weak one still gets the real verdict instead of a silent no-op. That ordering is exactly
+   * what the update handoff hits: a quit starts the weak stop, then the installer asks whether
+   * the Host really stopped cleanly. Weak callers keep their no-verdict contract.
    * @param requireGraceful - Reject update handoff after forced termination or unsuccessful child exit.
    * @returns Completion of owned process teardown. DesktopHostUncleanExitError confirms exit but refuses installation;
    * other failures do not confirm exit.
    */
   async stop(requireGraceful = false): Promise<void> {
+    this.stopPromise ??= this.teardown()
+    await this.stopPromise
+    const outcome = this.stopOutcome
+    /* v8 ignore next -- an unstarted child leaves no teardown to judge. */
+    if (!requireGraceful || outcome === undefined) return
+    if (outcome.graceful && outcome.exitCode === 0 && outcome.shutdownCompleted) return
+    // This diagnostic reaches expandable UI; arbitrary plugin stderr can contain credentials.
+    throw new DesktopHostUncleanExitError(`desktop update: Host did not complete graceful task teardown (exit ${String(outcome.exitCode)}, signal ${String(outcome.signalCode)}, shutdown acknowledged ${String(outcome.shutdownCompleted)}, graceful deadline exceeded ${String(!outcome.graceful)})`)
+  }
+
+  /** Tear the child down once; the outcome stays available so a later strong caller can judge it. */
+  private async teardown(): Promise<void> {
     const child = this.child
     if (child === undefined) return
     this.stopping = true
@@ -342,9 +372,8 @@ export class DesktopHostProcess {
       }
     }
     this.child = undefined
-    if (requireGraceful && (!graceful || child.exitCode !== 0 || !this.shutdownCompleted)) {
-      // This diagnostic reaches expandable UI; arbitrary plugin stderr can contain credentials.
-      throw new DesktopHostUncleanExitError(`desktop update: Host did not complete graceful task teardown (exit ${String(child.exitCode)}, signal ${String(child.signalCode)}, shutdown acknowledged ${String(this.shutdownCompleted)}, graceful deadline exceeded ${String(!graceful)})`)
+    this.stopOutcome = {
+      graceful, exitCode: child.exitCode, signalCode: child.signalCode, shutdownCompleted: this.shutdownCompleted,
     }
   }
 
