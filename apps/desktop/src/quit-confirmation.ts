@@ -7,6 +7,9 @@ import type { DesktopLocale, DesktopMessages } from './locale.ts'
 /** Locale key of the explanation shown before quitting, or none when quitting interrupts nothing. */
 export type DesktopQuitPrompt = Extract<keyof DesktopMessages, 'quitActiveTasks' | 'quitScheduledTasks' | 'quitActiveAndScheduledTasks'> | undefined
 
+/** How often a changing task set may reopen the confirmation before the quit is refused. */
+const QUIT_RECONFIRM_LIMIT = 3
+
 /**
  * Choose the confirmation copy for one inspection result.
  * @param inspection - Host answer, or `unknown` when the inspection failed or missed its deadline.
@@ -43,8 +46,11 @@ export class DesktopQuitConfirmation {
   constructor(private readonly options: DesktopQuitConfirmationOptions) {}
 
   /**
-   * Decide whether the quit may proceed. The inspection runs once per decision; work that starts or ends
-   * while the confirmation is open does not change its copy, and approval never re-inspects.
+   * Decide whether the quit may proceed.
+   *
+   * Approval applies to the work the user was shown. Work that starts while the box is open
+   * is re-inspected and described again, so a task cannot be interrupted silently by a
+   * decision made before it existed; work that ended needs no second box.
    * @returns true to quit now, false when the user cancelled.
    */
   confirm(): Promise<boolean> {
@@ -65,15 +71,38 @@ export class DesktopQuitConfirmation {
    */
   dispose(): void { this.disposed = true }
 
-  private async decide(): Promise<boolean> {
+  /** Inspect once: `unavailable` means no Host is ready, when nothing can be running. */
+  private async inspectPrompt(): Promise<{ available: false } | { available: true; prompt: DesktopQuitPrompt }> {
     const inspection = this.options.inspect()
-    if (inspection === undefined) return true
+    if (inspection === undefined) return { available: false }
     const prompt = resolveDesktopQuitPrompt(await inspection.catch((error: unknown) => {
       console.warn('desktop quit: task inspection unavailable', error)
       return 'unknown' as const
     }))
+    return { available: true, prompt }
+  }
+
+  private async decide(): Promise<boolean> {
+    let state = await this.inspectPrompt()
     if (this.disposed) return false
-    if (prompt === undefined) return true
+    if (!state.available || state.prompt === undefined) return true
+    // Bound the loop: a task set that keeps changing is not something to quit through silently.
+    for (let round = 0; round < QUIT_RECONFIRM_LIMIT; round++) {
+      const prompt = state.prompt
+      if (await this.ask(prompt) === false) return false
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- A bypassing quit can dispose while the box is open.
+      if (this.disposed) return false
+      state = await this.inspectPrompt()
+      if (this.disposed) return false
+      // The Host went away or the work finished: there is nothing left to interrupt.
+      if (!state.available || state.prompt === undefined) return true
+      // Same description: the approval still covers what is running.
+      if (state.prompt === prompt) return true
+    }
+    return false
+  }
+
+  private async ask(prompt: Exclude<DesktopQuitPrompt, undefined>): Promise<boolean> {
     const { messages } = this.options.locale()
     const windows = (this.options.platform ?? process.platform) === 'win32'
     // Button order follows each platform: macOS lays buttons out right-to-left from index 0, so
@@ -89,8 +118,6 @@ export class DesktopQuitConfirmation {
       cancelId: 1,
       noLink: true,
     })
-    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- A bypassing quit can dispose while the box is open.
-    if (this.disposed) return false
     return result.response === 0
   }
 }

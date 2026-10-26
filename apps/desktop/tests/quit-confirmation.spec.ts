@@ -6,14 +6,18 @@ import { DesktopQuitConfirmation, resolveDesktopQuitPrompt } from '../src/quit-c
 
 afterEach(() => { vi.restoreAllMocks() })
 
-function setup(platform: NodeJS.Platform, inspect: () => Promise<DesktopQuitInspection> | undefined, locale = 'zh') {
+function setup(platform: NodeJS.Platform, inspect: () => Promise<DesktopQuitInspection> | undefined, locale = 'zh', answers: number[] = []) {
   const shown: MessageBoxOptions[] = []
   let answer: MessageBoxReturnValue = { response: 0, checkboxChecked: false }
   const focus = vi.fn()
   const icon: NativeImage = { isEmpty: () => false } as never
   const confirmation = new DesktopQuitConfirmation({
     locale: () => resolveDesktopLocale(locale), inspect, focus, platform, icon,
-    show: async (options) => { shown.push(options); return answer },
+    show: async (options) => {
+      shown.push(options)
+      // A queued answer lets one test answer several boxes in order.
+      return answers.length === 0 ? answer : { response: answers.shift() ?? 1, checkboxChecked: false }
+    },
   })
   return { confirmation, shown, focus, icon, answer: (value: number) => { answer = { response: value, checkboxChecked: false } } }
 }
@@ -69,6 +73,34 @@ describe('DesktopQuitConfirmation', () => {
     expect(console.warn).toHaveBeenCalledWith('desktop quit: task inspection unavailable', expect.any(Error))
   })
 
+  it('asks again when a task starts while the confirmation is open', async () => {
+    // The approval covered "no active tasks"; a task that appeared meanwhile must not be
+    // interrupted by a decision the user made before it existed.
+    const results: DesktopQuitInspection[] = [
+      { activeTasks: false, scheduledTasks: true },
+      { activeTasks: true, scheduledTasks: false },
+    ]
+    const inspect = vi.fn(() => Promise.resolve(results.shift() ?? { activeTasks: true, scheduledTasks: false }))
+    // Quit on the first box, cancel the one that describes the newly started task.
+    const f = setup('darwin', inspect, 'zh', [0, 1])
+    expect(await f.confirmation.confirm()).toBe(false)
+    expect(f.shown.map(options => options.detail)).toEqual([
+      '应用关闭期间，定时任务不会运行',
+      '当前正在运行的任务将会中断',
+    ])
+  })
+
+  it('quits without a second box when the described work finished while it was open', async () => {
+    const results: DesktopQuitInspection[] = [
+      { activeTasks: true, scheduledTasks: false },
+      { activeTasks: false, scheduledTasks: false },
+    ]
+    const inspect = vi.fn(() => Promise.resolve(results.shift() ?? { activeTasks: false, scheduledTasks: false }))
+    const f = setup('darwin', inspect)
+    expect(await f.confirmation.confirm()).toBe(true)
+    expect(f.shown).toHaveLength(1)
+  })
+
   it('joins an open confirmation instead of stacking a second one and inspects once per decision', async () => {
     const inspected = Promise.withResolvers<DesktopQuitInspection>()
     const inspect = vi.fn(() => inspected.promise)
@@ -81,9 +113,12 @@ describe('DesktopQuitConfirmation', () => {
     inspected.resolve({ activeTasks: true, scheduledTasks: false })
     expect(await first).toBe(true)
     expect(f.shown).toHaveLength(1)
+    // Approval applied to the work the box described: the decision re-inspected once it was
+    // answered, and found the same task set, so it did not open a second box.
+    expect(inspect).toHaveBeenCalledTimes(2)
     // The decision is closed: the next request starts a fresh inspection.
     expect(f.confirmation.confirm()).not.toBe(first)
-    expect(inspect).toHaveBeenCalledTimes(2)
+    expect(inspect).toHaveBeenCalledTimes(3)
   })
 
   it('resolves a pending decision to false without a box once disposed, and refuses later requests', async () => {
