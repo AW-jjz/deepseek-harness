@@ -76,6 +76,7 @@ const harness = await vi.hoisted(async () => {
     readonly urls: string[] = []
     readonly webContents = Object.assign(new EventEmitter(), {
       id: 42,
+      reload: vi.fn(),
       setWindowOpenHandler: vi.fn(),
       insertCSS: vi.fn(async () => 'blur'),
       removeInsertedCSS: vi.fn(async () => {}),
@@ -2211,13 +2212,22 @@ describe('desktop main startup', () => {
     expect(window.urls).toEqual(['dsh-app://app/'])
   })
 
-  it('ignores subresource failures and navigation cancellation but reports a failed main document', async () => {
+  it('ignores subresource failures and navigation cancellation, reloads a failed main document, and reports a crash loop', async () => {
     await import('../src/main.ts')
     await harness.preparing.promise
     const window = harness.windows[0]!
     window.webContents.emit('did-fail-load', {}, -2, 'failed', 'dsh-app://app/image.png', false)
     window.webContents.emit('did-fail-load', {}, -3, 'aborted', 'dsh-app://app/', true)
     expect(harness.dialog.showMessageBox).not.toHaveBeenCalled()
+    // A failed main document is reloaded while the recovery budget lasts…
+    window.webContents.emit('did-fail-load', {}, -2, 'failed', 'dsh-app://app/', true)
+    expect(window.webContents.reload).toHaveBeenCalledOnce()
+    expect(harness.dialog.showMessageBox).not.toHaveBeenCalled()
+    // …and the last reload of the budget still does not open a dialog…
+    window.webContents.emit('did-fail-load', {}, -2, 'failed', 'dsh-app://app/', true)
+    expect(window.webContents.reload).toHaveBeenCalledTimes(2)
+    expect(harness.dialog.showMessageBox).not.toHaveBeenCalled()
+    // …while the failure that exhausts it does.
     window.webContents.emit('did-fail-load', {}, -2, 'failed', 'dsh-app://app/', true)
     await harness.dialogShown.promise
     expect((harness.dialog.showMessageBox.mock.calls[0]![0] as MessageBoxOptions).detail).toContain('Desktop page failed to load')
@@ -2238,8 +2248,14 @@ describe('desktop main startup', () => {
     await import('../src/main.ts')
     await harness.preparing.promise
     const window = harness.windows[0]!
-    if (kind === 'preload') window.webContents.emit('preload-error', {}, 'preload-app.cjs', new Error('preload unavailable'))
-    else window.webContents.emit('render-process-gone', {}, { reason: 'crashed' })
+    if (kind === 'preload') {
+      // A preload that cannot run is not recoverable by reloading.
+      window.webContents.emit('preload-error', {}, 'preload-app.cjs', new Error('preload unavailable'))
+    } else {
+      // A crash loop: each recovery reload is followed by another crash until the budget ends.
+      for (let crash = 0; crash < 3; crash++) window.webContents.emit('render-process-gone', {}, { reason: 'crashed' })
+      expect(window.webContents.reload).toHaveBeenCalledTimes(2)
+    }
     window.webContents.emit('preload-error', {}, 'preload-app.cjs', new Error('secondary failure'))
     harness.prepared.reject(new Error('backend also failed'))
     await harness.dialogShown.promise
@@ -2257,6 +2273,21 @@ describe('desktop main startup', () => {
     window.webContents.emit('render-process-gone', {}, { reason: 'crashed' })
     await vi.advanceTimersByTimeAsync(0)
     expect(harness.dialog.showMessageBox).not.toHaveBeenCalled()
+  })
+
+  it('records a renderer exit during a session end without opening a dialog', async () => {
+    // Windows tells the window the session is ending; a modal box here would stall the
+    // shutdown the operating system is waiting on, so only the crash report is written.
+    await import('../src/main.ts')
+    await harness.preparing.promise
+    const window = harness.windows[0]!
+    window.emit('session-end')
+    window.webContents.emit('render-process-gone', {}, { reason: 'killed' })
+    window.webContents.emit('preload-error', {}, 'preload-app.cjs', new Error('session end preload'))
+    await vi.advanceTimersByTimeAsync(0)
+    expect(harness.dialog.showMessageBox).not.toHaveBeenCalled()
+    expect(window.webContents.reload).not.toHaveBeenCalled()
+    expect(writeCrashReport).toHaveBeenCalledWith('desktop-test-logs', expect.objectContaining({ source: 'renderer' }))
   })
 
   it('reports a rejected document load without navigating to a recovery page', async () => {

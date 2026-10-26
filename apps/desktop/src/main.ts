@@ -40,6 +40,7 @@ import { prepareDesktopUpdateWindow } from './update-window.ts'
 import { DesktopCommandManager } from './command-management.ts'
 import { serveWebDocument, authenticateWebHost, forwardWebRequest } from './web-document.ts'
 import { DesktopFatalRecovery } from './fatal-recovery.ts'
+import { RENDERER_RELOAD_LIMIT, RENDERER_STABLE_MS, decideRendererFailure } from './renderer-recovery.ts'
 import { pruneCrashReports, RendererConsoleTail, writeCrashReport, type CrashReportSource } from './crash-report.ts'
 import { openWelcomeWindow } from './welcome-window.ts'
 import { WELCOME_IPC, needsWelcome, type WelcomeNotice } from './welcome-api.ts'
@@ -67,6 +68,11 @@ import { DesktopBackgroundNotice } from './background-notice.ts'
 let focusPrimaryWindow = (): void => {}
 let stopForRecovery = async (): Promise<void> => {}
 let shuttingDown = false
+/**
+ * The operating system is ending the session: quit skips its confirmation and no failure may
+ * open a dialog, because a modal box would stall the shutdown the OS is waiting on.
+ */
+let sessionEnding = false
 /**
  * Set by quit entries that must not ask: crash recovery exit and restart, and the
  * development restart command. The installer handoff has its own before-quit branch.
@@ -125,8 +131,9 @@ function persistCrashReport(error: unknown, source: CrashReportSource): Promise<
 
 function reportFatal(error: unknown, source: CrashReportSource): void {
   console.error(error)
-  if (shuttingDown) {
-    // No dialog during shutdown, but the report still records what failed on the way out.
+  if (shuttingDown || sessionEnding) {
+    // No dialog while leaving (or while the OS is ending the session), but the report still
+    // records what failed on the way out.
     void persistCrashReport(error, source)
     return
   }
@@ -380,12 +387,6 @@ async function main(): Promise<void> {
   let mandatoryUI: DesktopMandatoryUpdateWindow | undefined
   let policyAuth: DesktopPolicyTestAuth | undefined
   let tray: DesktopTray | undefined
-  /**
-   * The operating system is ending the session: the quit skips its confirmation. Windows sets it
-   * on the definitive session-end message. macOS sets it on the power-off notification, which
-   * another application can still cancel, so the next focus or show of the main window clears it.
-   */
-  let sessionEnding = false
   const isQuitting = (): boolean => quitting
   const currentMainWindow = (): BrowserWindow | undefined => mainWindow
   const ordinaryDialogs = new Set<AbortController>()
@@ -682,7 +683,6 @@ async function main(): Promise<void> {
     // A confirmation on a hidden window would go unseen, so it waits for the next show; the mandatory
     // flow keeps its own taskbar and Dock attention instead.
     if (!isMandatory()) await windowShown()
-    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- A quit can begin while the show is awaited.
     if (quitting) return state
     return updates.install(version)
   }
@@ -1127,23 +1127,52 @@ async function main(): Promise<void> {
       window.on('show', () => { sessionEnding = false })
     }
     window.on('closed', () => { if (mainWindow === window) mainWindow = undefined })
+    // One crash reloads the page; a crash loop exhausts the budget and becomes fatal. The
+    // budget refills once the renderer has stayed alive long enough to count as recovered.
+    let rendererReloadsLeft = RENDERER_RELOAD_LIMIT
+    let rendererStableTimer: NodeJS.Timeout | undefined
+    const noteRendererStable = (): void => {
+      if (rendererStableTimer !== undefined) clearTimeout(rendererStableTimer)
+      rendererStableTimer = setTimeout(() => { rendererReloadsLeft = RENDERER_RELOAD_LIMIT }, RENDERER_STABLE_MS)
+      rendererStableTimer.unref()
+    }
+    window.webContents.on('did-finish-load', noteRendererStable)
+    const handleRendererFailure = (error: Error, input: { reason: string; recoverable: boolean }): void => {
+      const action = decideRendererFailure({
+        quitting: quitting || shellInstallerOwnsQuit, destroyed: window.isDestroyed(), sessionEnding,
+        reason: input.reason, recoverable: input.recoverable, reloadsLeft: rendererReloadsLeft,
+      })
+      if (action === 'ignore') return
+      if (action === 'report-only') { void persistCrashReport(error, 'renderer'); return }
+      if (action === 'fatal') { reportFatal(error, 'renderer'); return }
+      rendererReloadsLeft--
+      if (rendererStableTimer !== undefined) { clearTimeout(rendererStableTimer); rendererStableTimer = undefined }
+      // Keep the evidence, then let the page re-fetch its state from the Host.
+      void persistCrashReport(error, 'renderer')
+      console.warn(`desktop renderer: ${input.reason}; reloading with ${String(rendererReloadsLeft)} retries left`)
+      window.webContents.reload()
+    }
     window.webContents.on('console-message', (details) => {
       if (details.level !== 'error') return
       rendererConsole.push(`${details.sourceId}:${String(details.lineNumber)} ${details.message}`)
     })
     window.webContents.on('did-fail-load', (_event, code, description, url, isMainFrame) => {
-      if (isMainFrame && code !== -3 && !quitting && !window.isDestroyed()) {
-        reportFatal(new Error(`Desktop page failed to load: ${url} (${String(code)}: ${description})`), 'renderer')
+      if (isMainFrame && code !== -3) {
+        handleRendererFailure(new Error(`Desktop page failed to load: ${url} (${String(code)}: ${description})`),
+          { reason: 'did-fail-load', recoverable: true })
       }
     })
     window.webContents.on('preload-error', (_event, _path, error) => {
-      if (!quitting && !window.isDestroyed()) reportFatal(error, 'renderer')
+      // A preload that cannot run will not start working after a reload.
+      handleRendererFailure(error, { reason: 'preload-error', recoverable: false })
     })
     window.webContents.on('render-process-gone', (_event, details) => {
       navigation = undefined
-      if (!quitting && !window.isDestroyed() && details.reason !== 'clean-exit') {
-        reportFatal(new Error(`Desktop renderer exited: ${details.reason}`), 'renderer')
-      }
+      handleRendererFailure(new Error(`Desktop renderer exited: ${details.reason}`),
+        { reason: details.reason, recoverable: true })
+    })
+    window.on('closed', () => {
+      if (rendererStableTimer !== undefined) { clearTimeout(rendererStableTimer); rendererStableTimer = undefined }
     })
     return window
   }
