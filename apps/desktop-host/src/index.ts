@@ -159,14 +159,18 @@ async function main(): Promise<void> {
     installPlatformSessionPublisher(ctx, (session) => {
       if (process.connected) process.send?.({ type: 'platform-session', session })
     })
+    // Reading the connection and the index injections also touches the context, so it stays
+    // inside the transaction: a mid-tail disposal must not turn into a startup failure.
+    const url = ctx.connection.authenticatedUrl(`${ctx.webServer.protocol}//127.0.0.1:${String(ctx.webServer.port)}`)
+    const injections = ctx.webServer.collectIndexInjections(ctx.connection.browserPeer)
+    if (stopping === undefined && process.connected) {
+      process.send?.({ type: 'ready', url, injections }, (error) => { if (error !== null) console.error(error) })
+    }
   } catch (error) {
     // The context can complete disposal mid-tail (e.g. between the guard and a
     // registration); nothing in the tail may outlive its context.
     if (!(error instanceof CordisError) || error.code !== 'INACTIVE_EFFECT') throw error
-    return
   }
-  const url = ctx.connection.authenticatedUrl(`${ctx.webServer.protocol}//127.0.0.1:${String(ctx.webServer.port)}`)
-  if (stopping === undefined && process.connected) process.send?.({ type: 'ready', url, injections: ctx.webServer.collectIndexInjections(ctx.connection.browserPeer) }, (error) => { if (error !== null) console.error(error) })
 }
 
 /** Upper bound of the startup diagnostic carried over IPC; the head holds the message and stack. */

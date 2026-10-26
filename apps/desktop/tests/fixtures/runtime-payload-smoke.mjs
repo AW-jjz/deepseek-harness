@@ -132,9 +132,39 @@ function checkHtml() {
   assert.match(markdown, /\| x\s+\| 7\s+\|/u)
 }
 
+/**
+ * Resolve an internal module the way the profile resolver does (R-16 bridge): the
+ * `--expose-internals` flag path first, the addon as the fallback for flagless runtimes.
+ * The smoke runs with the flag, so it must not require the addon's fingerprint matrix to
+ * include this Electron — it asserts the resolution the Host will actually perform.
+ */
+function requireInternalRuntime(moduleId) {
+  if (process.execArgv.includes('--expose-internals')) {
+    try { return { via: 'flag', module: require(moduleId) } } catch { /* fall through to the addon */ }
+  }
+  const addon = requireRuntime('node-addon-require-builtin')
+  return { via: 'addon', module: addon.requireBuiltin(moduleId) }
+}
+
+/** Report whether the addon itself accepts this runtime fingerprint; informational under R-16. */
+function reportAddonFingerprint() {
+  try {
+    const addon = requireRuntime('node-addon-require-builtin')
+    const cjs = addon.requireBuiltin('internal/modules/cjs/loader')
+    console.error(`runtime payload: addon fingerprint accepted (${process.versions.electron ?? 'node'} ${process.versions.node})`)
+    return cjs !== undefined
+  } catch (error) {
+    console.error(`runtime payload: addon fingerprint unavailable (${process.versions.electron ?? 'node'} ${process.versions.node}): ${error.message}`)
+    return false
+  }
+}
+
 try {
-  const builtin = requireRuntime('node-addon-require-builtin')
-  assert.equal(typeof builtin.requireBuiltin('internal/modules/esm/loader').getOrInitializeCascadedLoader, 'function')
+  const addonAccepted = reportAddonFingerprint()
+  const internals = requireInternalRuntime('internal/modules/esm/loader')
+  assert.equal(typeof internals.module.getOrInitializeCascadedLoader, 'function')
+  console.error(`runtime payload: internals resolved via ${internals.via}`)
+  if (internals.via !== 'flag' && !addonAccepted) throw new Error('neither the flag nor the addon provides internal modules')
   console.error('runtime payload: pnpm')
   await checkPnpm(resourcesRuntime)
   console.error('runtime payload: koffi')

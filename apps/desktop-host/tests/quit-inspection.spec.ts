@@ -100,4 +100,15 @@ describe('Desktop Host quit inspection', () => {
     await ctx.fiber.dispose()
     await expect(inspect()).rejects.toThrow('Host is stopping')
   })
+
+  it('survives registration on a context that is already unloading and fails closed', async () => {
+    // Boot can reach registration after a shutdown started unloading the context; effect
+    // registration then throws INACTIVE_EFFECT, which must not escape into main().
+    const unloading = new Context()
+    const pending = unloading.fiber.dispose()
+    let late: ReturnType<typeof installDesktopQuitInspection> | undefined
+    expect(() => { late = installDesktopQuitInspection(unloading) }).not.toThrow()
+    await pending
+    await expect(late!()).rejects.toThrow('Host is stopping')
+  })
 })

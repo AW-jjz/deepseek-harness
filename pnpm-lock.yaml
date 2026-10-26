@@ -781,7 +781,7 @@ importers:
         specifier: 3.0.0
         version: 3.0.0
       electron:
-        specifier: ^44.9.3
+        specifier: 44.9.3
         version: 44.9.3(supports-color@9.4.0)
       electron-builder:
         specifier: ^26.17.0

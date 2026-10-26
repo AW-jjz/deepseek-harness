@@ -22,7 +22,7 @@ import { notarizeMacOS } from './notarize-macos.mjs'
 import { resolveMacOSNotarizationEnvironment } from './desktop-release-environment.mjs'
 import { DESKTOP_BUILD_VERSION_ENV, resolveDesktopBuildVersion, validateDesktopBuildVersion } from './desktop-build-version.mjs'
 import { suggestDesktopBuildVersion } from './desktop-build-version-discovery.ts'
-import { desktopBuildCommitEnvironment, readDesktopBuildCommit, resolveDesktopBuildCommit } from './desktop-build-commit.mjs'
+import { assertDesktopBuildProvenance, desktopBuildCommitEnvironment, readDesktopBuildCommit, resolveDesktopBuildCommit } from './desktop-build-commit.mjs'
 import { requireDesktopToolchain } from './desktop-toolchain-preflight.ts'
 import { withMacOSNotarizationProxy } from './macos-notarization-proxy.ts'
 
@@ -362,7 +362,11 @@ async function main(): Promise<void> {
   }
   process.stdout.write(`desktop package: ${target.name} publishes ${buildVersion}${buildVersion === productVersion ? '' : ` for product version ${productVersion}`}\n`)
   const packaged = readDesktopBuildCommit(REPOSITORY_ROOT)
+  // Provenance gate: no artifact may exist whose commit, tree state, or Electron version
+  // cannot be checked against this checkout (see the S0 postmortem).
+  const provenance = assertDesktopBuildProvenance(REPOSITORY_ROOT, APP_ROOT, packaged, environment)
   Object.assign(environment, desktopBuildCommitEnvironment(packaged))
+  process.stdout.write(`desktop package: sources ${provenance.commit.slice(0, 12)}${provenance.dirty ? ' (dirty, internal only)' : ''}, Electron ${provenance.electron}\n`)
   const secrets = Object.entries(environment).filter(([name]) => /KEY|SECRET|TOKEN|PASSWORD|APPLE_ID/iu.test(name)).map(([, value]) => value ?? '')
   const run = createPackagingRun(join(APP_ROOT, '.desktop-build', 'packaging-runs'), {
     target: target.name, unsigned: invocation.unsigned, skipNotarization: invocation.skipNotarization,

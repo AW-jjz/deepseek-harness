@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
+import { gzipSync } from 'node:zlib'
 import { AddressInfo } from 'node:net'
 import { Context } from '@deepseek-ai/cordis'
 import WebRuntime from '@deepseek-ai/dsh-web'
@@ -111,6 +112,33 @@ describe('HttpFetchProvider success', () => {
     handler = (req, res) => { seen = req.headers['user-agent']; res.writeHead(200, { 'content-type': 'text/plain' }); res.end('ok') }
     await provider().fetch({ url: base })
     expect(seen).toBe('test-agent/1.0')
+  })
+
+  it('never invites Brotli from an untrusted origin', async () => {
+    let seen: string | undefined
+    handler = (req, res) => { seen = req.headers['accept-encoding']; res.writeHead(200, { 'content-type': 'text/plain' }); res.end('ok') }
+    await provider().fetch({ url: base })
+    expect(seen).toBe('gzip, deflate, identity')
+  })
+
+  it.each(['br', 'gzip, br', 'BR'])('rejects a Brotli-encoded response (%s) before any body byte reaches the decoder', async (encoding) => {
+    // The provider never asks for br; a server (or an intermediary) that sends it anyway must
+    // not get its payload decompressed here, so the response is rejected instead of decoded.
+    handler = (_req, res) => {
+      res.writeHead(200, { 'content-type': 'text/plain', 'content-encoding': encoding })
+      res.end('not-actually-brotli')
+    }
+    await expect(provider().fetch({ url: base }))
+      .rejects.toThrow(expect.objectContaining({ code: 'WEB_UNSUPPORTED_CONTENT_ENCODING' }))
+  })
+
+  it('still decodes a gzip response, which the provider does ask for', async () => {
+    handler = (_req, res) => {
+      res.writeHead(200, { 'content-type': 'text/plain', 'content-encoding': 'gzip' })
+      res.end(gzipSync(Buffer.from('compressed body')))
+    }
+    const result = await provider().fetch({ url: base })
+    expect(result.body.content).toBe('compressed body')
   })
 
   it('returns a non-2xx response as a result, not an error', async () => {

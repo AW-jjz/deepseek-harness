@@ -109,7 +109,9 @@ export function createElectronBuilderConfig(
     protocols: [{ name: 'DeepSeek Harness', schemes: ['dsh'] }],
     extraMetadata: {
       dshDesktopAppId: appId,
-      dshDesktopUpdateChannel: update?.channel ?? 'nightly',
+      // An unsigned build has no update feed (`update` is undefined), so it must not read as a
+      // releasable channel: the marker below is what support and the upload plan key on.
+      ...unsigned ? { dshDesktopUnsignedBuild: true } : { dshDesktopUpdateChannel: update?.channel ?? 'nightly' },
       ...(policy === undefined ? {} : { dshMandatoryUpdatePolicy: policy }),
       ...buildVersion === productVersion ? {} : { version: buildVersion },
       ...packaged === undefined ? {} : { dshBuildCommit: packaged.commit, dshBuildDirty: packaged.dirty },

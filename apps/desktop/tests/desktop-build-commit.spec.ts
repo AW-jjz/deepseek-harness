@@ -3,8 +3,10 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
+  DESKTOP_ALLOW_DIRTY_BUILD_ENV,
   DESKTOP_BUILD_COMMIT_ENV,
   DESKTOP_BUILD_DIRTY_ENV,
+  assertDesktopBuildProvenance,
   desktopBuildCommitEnvironment,
   readDesktopBuildCommit,
   resolveDesktopBuildCommit,
@@ -12,6 +14,8 @@ import {
 import { probeDesktopToolchain } from '../scripts/desktop-toolchain-preflight.ts'
 
 const COMMIT = '0123456789abcdef0123456789abcdef01234567'
+const REPOSITORY_ROOT = join(import.meta.dirname, '..', '..', '..')
+const APP_ROOT = join(import.meta.dirname, '..')
 const directories: string[] = []
 
 afterEach(async () => {
@@ -44,6 +48,33 @@ describe('desktop build commit', () => {
     const packaged = readDesktopBuildCommit(join(import.meta.dirname, '..', '..', '..'))
     expect(packaged.commit).toMatch(/^[0-9a-f]{40}$/u)
     expect(typeof packaged.dirty).toBe('boolean')
+  })
+})
+
+describe('desktop build provenance gate', () => {
+  it('rejects a commit this checkout cannot resolve, as a build from another clone records', () => {
+    expect(() => assertDesktopBuildProvenance(REPOSITORY_ROOT, APP_ROOT, { commit: COMMIT, dirty: false }, {}))
+      .toThrow(/is not present in/u)
+  })
+
+  it('rejects an uncommitted tree unless the caller accepts an internal build', () => {
+    const head = readDesktopBuildCommit(REPOSITORY_ROOT).commit
+    expect(() => assertDesktopBuildProvenance(REPOSITORY_ROOT, APP_ROOT, { commit: head, dirty: true }, {}))
+      .toThrow(/uncommitted changes/u)
+    // Accepted with the explicit override; the Electron check still runs and passes here.
+    expect(assertDesktopBuildProvenance(REPOSITORY_ROOT, APP_ROOT, { commit: head, dirty: true },
+      { [DESKTOP_ALLOW_DIRTY_BUILD_ENV]: '1' })).toEqual({ commit: head, dirty: true, electron: expect.stringMatching(/^\d+\.\d+\.\d+/u) as unknown as string })
+  })
+
+  it('rejects an installed Electron that differs from the declared version', async () => {
+    const head = readDesktopBuildCommit(REPOSITORY_ROOT).commit
+    const app = await mkdtemp(join(tmpdir(), 'dsh-app-root-'))
+    directories.push(app)
+    await writeFile(join(app, 'package.json'), JSON.stringify({ devDependencies: { electron: '1.2.3' } }))
+    // Resolution of `electron/package.json` from the temporary root fails or finds another version;
+    // either way the gate must not pass silently.
+    expect(() => assertDesktopBuildProvenance(REPOSITORY_ROOT, app, { commit: head, dirty: false }, {}))
+      .toThrow(/Electron|Cannot find module/u)
   })
 })
 
