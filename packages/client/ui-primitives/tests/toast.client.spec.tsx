@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render } from '@testing-library/react'
+import { act, cleanup, fireEvent, render } from '@testing-library/react'
 import { Toast } from '../src/Toast.tsx'
 
 afterEach(cleanup)
@@ -73,6 +73,43 @@ describe('Toast', () => {
       fireEvent(window, new Event('resize'))
       expect(view.getByRole('alert').style.left).toBe('400px')
       anchor.remove()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('pauses its lifetime while an action banner is hovered, and resumes after', () => {
+    // An undo must not expire while the user is reading or reaching for it.
+    vi.useFakeTimers()
+    try {
+      const onDone = vi.fn()
+      const view = render(
+        <Toast text="已删除，可" actions={[{ label: '撤销', onClick: vi.fn() }]} holdMs={1_000} onDone={onDone} />,
+      )
+      const banner = view.getByRole('alert')
+      fireEvent.pointerEnter(banner)
+      act(() => { vi.advanceTimersByTime(5_000) })
+      expect(onDone).not.toHaveBeenCalled()
+      // The CSS fade pauses with the timer, so the banner cannot fade while it is being read.
+      expect((banner as HTMLElement).style.animationPlayState).toBe('paused')
+      fireEvent.pointerLeave(banner)
+      expect((banner as HTMLElement).style.animationPlayState).toBe('')
+      act(() => { vi.advanceTimersByTime(2_000) })
+      expect(onDone).toHaveBeenCalledOnce()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('keeps a plain announcement click-through and dismisses on schedule', () => {
+    vi.useFakeTimers()
+    try {
+      const onDone = vi.fn()
+      const view = render(<Toast text="已保存" holdMs={1_000} onDone={onDone} />)
+      const banner = view.getByRole('alert')
+      expect((banner as HTMLElement).style.pointerEvents).toBe('')
+      act(() => { vi.advanceTimersByTime(2_000) })
+      expect(onDone).toHaveBeenCalledOnce()
     } finally {
       vi.useRealTimers()
     }

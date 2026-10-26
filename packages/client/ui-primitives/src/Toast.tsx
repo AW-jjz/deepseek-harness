@@ -54,10 +54,25 @@ export function Toast({ text, icon, tone, anchor, holdMs = HOLD_MS, actions, onD
 }) {
   const latestOnDone = useRef(onDone)
   useLayoutEffect(() => { latestOnDone.current = onDone }, [onDone])
+  // A banner carrying an action is a decision surface, not an announcement: it takes the
+  // pointer so its text can be selected, and it stops counting down while the pointer or
+  // focus is on it, so an undo cannot expire while the user is reading or reaching for it.
+  const interactive = actions !== undefined && actions.length > 0
+  const [paused, setPaused] = useState(false)
+  const remaining = useRef(holdMs + FADE_MS)
+  const startedAt = useRef(0)
   useEffect(() => {
-    const timer = setTimeout(() => { latestOnDone.current() }, holdMs + FADE_MS)
-    return () => { clearTimeout(timer) }
+    remaining.current = holdMs + FADE_MS
   }, [holdMs])
+  useEffect(() => {
+    if (paused) return
+    startedAt.current = Date.now()
+    const timer = setTimeout(() => { latestOnDone.current() }, remaining.current)
+    return () => {
+      clearTimeout(timer)
+      remaining.current = Math.max(0, remaining.current - (Date.now() - startedAt.current))
+    }
+  }, [paused, holdMs])
   // Anchor-centered placement re-measures on window resizes; the banner lives
   // four seconds, so sub-window layout drift within that span stays out of
   // scope.
@@ -76,10 +91,21 @@ export function Toast({ text, icon, tone, anchor, holdMs = HOLD_MS, actions, onD
     <div
       className={css.toast}
       role="alert"
+      data-toast-paused={paused || undefined}
       style={{
         ...left === null ? {} : { left },
         '--dsh-toast-hold': `${String(holdMs)}ms`,
+        // The fade is a CSS animation behind the same hold; pausing only the JS timer would
+        // let the banner fade out while it is still mounted and being read.
+        ...paused ? { animationPlayState: 'paused' } : {},
+        ...interactive ? { pointerEvents: 'auto', userSelect: 'text' } : {},
       } as CSSProperties}
+      onPointerEnter={interactive ? () => { setPaused(true) } : undefined}
+      onPointerLeave={interactive ? () => { setPaused(false) } : undefined}
+      onFocusCapture={interactive ? () => { setPaused(true) } : undefined}
+      onBlurCapture={interactive
+        ? (event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setPaused(false) }
+        : undefined}
     >
       {tone === 'success'
         ? <span className={`${css.icon} ${css.success}`} aria-hidden><IconCheckCircleOutlineRegular /></span>
