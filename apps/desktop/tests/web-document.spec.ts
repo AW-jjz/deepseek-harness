@@ -27,6 +27,29 @@ it('serves the Web entry and assets without starting or contacting a Host', asyn
   expect((await serveWebDocument(new Request('dsh-app://app/missing.js'), root)).status).toBe(404)
 })
 
+it('sends the application document a policy that blocks remote script and remote origins', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'desktop-web-'))
+  roots.push(root)
+  await writeFile(join(root, 'index.html'), '<html><head></head><body></body></html>')
+  await writeFile(join(root, 'app.js'), 'void 0')
+  const document = await serveWebDocument(new Request('dsh-app://app/'), root)
+  const policy = document.headers.get('content-security-policy') ?? ''
+  // Remote script is what an injected document would need; inline stays because the Host
+  // injects startup code.
+  expect(policy).toContain("script-src 'self' 'unsafe-inline' blob:")
+  expect(policy).not.toContain('script-src *')
+  // The client only talks to its own origin and the loopback Host.
+  expect(policy).toContain("connect-src 'self'")
+  expect(policy).toContain('ws://127.0.0.1:*')
+  expect(policy).not.toContain('connect-src *')
+  expect(policy).toContain("object-src 'none'")
+  expect(policy).toContain("base-uri 'none'")
+  // Blob workers back uploads and the excel/pdf viewers.
+  expect(policy).toContain("worker-src 'self' blob:")
+  // Assets do not carry the document policy.
+  expect((await serveWebDocument(new Request('dsh-app://app/app.js'), root)).headers.get('content-security-policy')).toBeNull()
+})
+
 it('requires the Host authentication exchange and retains only its cookie value', async () => {
   const fetch = vi.fn().mockResolvedValueOnce(new Response(null, { status: 303, headers: { 'set-cookie': 'session=owned; HttpOnly; SameSite=Strict' } }))
     .mockResolvedValueOnce(new Response('unauthorized', { status: 401 }))

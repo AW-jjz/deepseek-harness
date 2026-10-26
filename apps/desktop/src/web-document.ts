@@ -19,6 +19,31 @@ export const AUTHENTICATION_ATTEMPTS = 3
 const AUTHENTICATION_RETRY_MS = 500
 
 /**
+ * Policy for the application document.
+ *
+ * It blocks the two things an injected document would otherwise be able to do without a
+ * warning — load remote script and talk to a remote origin — while keeping what the client
+ * actually uses: inline boot scripts and Host injections (`'unsafe-inline'`), blob workers for
+ * upload/excel/pdf, the loopback Host over both HTTP and WebSocket, and remote images.
+ * `'unsafe-inline'` is the deliberate limit here: the Host injects inline startup code, so
+ * scripts are not nonce-gated yet.
+ */
+export const APPLICATION_CONTENT_SECURITY_POLICY = [
+  "default-src 'self'",
+  "base-uri 'none'",
+  "object-src 'none'",
+  "form-action 'none'",
+  "frame-src 'self'",
+  "script-src 'self' 'unsafe-inline' blob:",
+  "style-src 'self' 'unsafe-inline'",
+  "img-src 'self' data: blob: https:",
+  "font-src 'self' data:",
+  "media-src 'self' data: blob:",
+  "worker-src 'self' blob:",
+  'connect-src \'self\' http://127.0.0.1:* https://127.0.0.1:* ws://127.0.0.1:* wss://127.0.0.1:* http://localhost:* ws://localhost:*',
+].join('; ')
+
+/**
  * Read an application-owned static asset; the index waits for asynchronous Host injections.
  * @param request - Local application request.
  * @param root - Packaged Web dist directory.
@@ -39,8 +64,12 @@ export async function serveWebDocument(request: Request, root: string): Promise<
   }
   const content = pathname === '/' || pathname === '/index.html'
     ? body.toString().replace('<head>', '<head>' + BOOT) : new Uint8Array(body)
+  const isDocument = pathname === '/' || pathname === '/index.html'
   return new Response(request.method === 'HEAD' ? null : content, {
-    headers: { 'content-type': MIME[extname(target)] ?? 'application/octet-stream' },
+    headers: {
+      'content-type': MIME[extname(target)] ?? 'application/octet-stream',
+      ...isDocument ? { 'content-security-policy': APPLICATION_CONTENT_SECURITY_POLICY } : {},
+    },
   })
 }
 
