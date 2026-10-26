@@ -90,7 +90,6 @@ export class DesktopQuitConfirmation {
     for (let round = 0; round < QUIT_RECONFIRM_LIMIT; round++) {
       const prompt = state.prompt
       if (await this.ask(prompt) === false) return false
-      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- A bypassing quit can dispose while the box is open.
       if (this.disposed) return false
       state = await this.inspectPrompt()
       if (this.disposed) return false
