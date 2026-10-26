@@ -34,8 +34,14 @@ function record(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
-/** Deadline for one welcome RPC; a slow Host surfaces as a readable failure instead of a frozen screen. */
-export const WELCOME_RPC_TIMEOUT_MS = 5_000
+/**
+ * Deadline for one welcome RPC.
+ *
+ * Generous on purpose: a profile created moments ago makes the Host block its loop while it
+ * reconciles packages, and a boot-time RPC that misses a short deadline would leave the
+ * window on the boot screen. The bound still turns a hung Host into a readable failure.
+ */
+export const WELCOME_RPC_TIMEOUT_MS = 20_000
 
 /** Authentication attempts before the welcome screen reports a failure. */
 export const WELCOME_AUTH_ATTEMPTS = 3
