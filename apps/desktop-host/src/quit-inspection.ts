@@ -1,6 +1,6 @@
 /** Quit-time inspection of interruptible work and armed scheduled reminders for the Electron shell. */
 
-import type { Context } from '@deepseek-ai/cordis'
+import { CordisError, type Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-workspace'
 import type {} from '@deepseek-ai/dsh-schedule'
 import { hasDesktopActiveTasks } from './update-tasks.ts'
@@ -22,7 +22,15 @@ export interface DesktopQuitInspection {
  */
 export function installDesktopQuitInspection(ctx: Context): () => Promise<DesktopQuitInspection> {
   let stopped = false
-  ctx.effect(() => () => { stopped = true })
+  try {
+    ctx.effect(() => () => { stopped = true })
+  } catch (error) {
+    // The same disposing-context window as update task control: registration must not
+    // crash a Host that is already tearing down; the inspector fails closed instead.
+    if (!(error instanceof CordisError) || error.code !== 'INACTIVE_EFFECT') throw error
+    stopped = true
+    ctx.logger('desktop-quit').warn('quit inspection skipped registration on a disposing Host context')
+  }
   return async () => {
     if (stopped) throw new Error('desktop quit: Host is stopping')
     const agents = ctx.get('agents')

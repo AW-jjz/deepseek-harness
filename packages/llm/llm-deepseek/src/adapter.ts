@@ -140,6 +140,10 @@ export class DeepSeekAdapter<C extends Connection = Connection> extends LlmAdapt
           headers: {
             ...attributionHeaders(),
             'content-type': 'application/json', 'accept': 'text/event-stream',
+            // Transport hygiene while the host runtime sits inside the Node 2026-10 brotli security
+            // window: never invite Brotli, and reject a gateway that answers with it anyway
+            // before any stream byte is read.
+            'accept-encoding': 'gzip, deflate, identity',
             ...auth.headers,
             'anthropic-version': '2023-06-01',
             ...betas.length === 0 ? {} : { 'anthropic-beta': betas.join(',') },

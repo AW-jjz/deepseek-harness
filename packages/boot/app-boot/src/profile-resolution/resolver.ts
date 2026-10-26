@@ -732,18 +732,28 @@ class ResolutionRouter {
 
 function internalModules(): InternalModules {
   const require = createRequire(import.meta.url)
-  const addon = require('node-addon-require-builtin') as { requireBuiltin(moduleId: string): unknown }
-  const esmModule = addon.requireBuiltin('internal/modules/esm/loader') as {
+  // Flag-first bridge (R-16): while `--expose-internals` is present the native require path is
+  // equivalent and keeps the addon's runtime fingerprint matrix off the boot-critical path; the
+  // addon remains the fallback for flagless runtimes. Remove once the addon matrix covers the
+  // pinned Electron again (see the release record for the expiry).
+  const requireBuiltin = (moduleId: string): unknown => {
+    if (process.execArgv.includes('--expose-internals')) {
+      try { return require(moduleId) } catch { /* fall through to the addon */ }
+    }
+    const addon = require('node-addon-require-builtin') as { requireBuiltin(moduleId: string): unknown }
+    return addon.requireBuiltin(moduleId)
+  }
+  const esmModule = requireBuiltin('internal/modules/esm/loader') as {
     getOrInitializeCascadedLoader(): ModuleLoaderV1 | ModuleLoaderV2
   }
-  const cjsModule = addon.requireBuiltin('internal/modules/cjs/loader') as { Module: CommonJsModule }
-  const cjsHelpers = addon.requireBuiltin('internal/modules/helpers') as {
+  const cjsModule = requireBuiltin('internal/modules/cjs/loader') as { Module: CommonJsModule }
+  const cjsHelpers = requireBuiltin('internal/modules/helpers') as {
     getCjsConditions(): ReadonlySet<string>
   }
-  const esmUtils = addon.requireBuiltin('internal/modules/esm/utils') as {
+  const esmUtils = requireBuiltin('internal/modules/esm/utils') as {
     getDefaultConditions(): readonly string[]
   }
-  const esmResolve = addon.requireBuiltin('internal/modules/esm/resolve') as {
+  const esmResolve = requireBuiltin('internal/modules/esm/resolve') as {
     defaultResolve(
       specifier: string,
       context: { parentURL?: string; conditions?: readonly string[] },

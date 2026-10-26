@@ -1,7 +1,9 @@
 /** Launch the Desktop profile through the Web application and report its URL to Electron. */
 
 import { delimiter, join } from 'node:path'
+import { createRequire } from 'node:module'
 import { inspect } from 'node:util'
+import { CordisError } from '@deepseek-ai/cordis'
 import { loadLayeredEnv, loadProfileDirectory, reportSkippedBundles } from '@deepseek-ai/dsh-app-boot'
 import { runProfile } from '@deepseek-ai/dsh/profile-boot'
 import type {} from '@deepseek-ai/dsh-client-connection'
@@ -16,7 +18,27 @@ import { installDesktopQuitInspection } from './quit-inspection.ts'
 import { installPlatformSessionPublisher } from './platform-session.ts'
 import { installOfficeEngineResolution } from './office-engine.ts'
 
+/**
+ * Emit the machine-readable R-16 bridge diagnostics: whether V8 internals are exposed
+ * on this Host and whether the resolver's addon still loads. The packaging smoke and
+ * the release record consume these lines verbatim.
+ */
+function reportInternalsDiagnostics(): void {
+  const internalsExposed = process.execArgv.includes('--expose-internals')
+  let addonAvailable = false
+  let addonVersion = 'unknown'
+  try {
+    const require = createRequire(import.meta.url)
+    try { addonVersion = (require('node-addon-require-builtin/package.json') as { version: string }).version } catch { /* exports map may hide package.json */ }
+    const addon = require('node-addon-require-builtin') as { requireBuiltin(moduleId: string): unknown }
+    addonAvailable = addon.requireBuiltin('internal/modules/cjs/loader') !== undefined
+  } catch { addonAvailable = false }
+  console.log(`internals exposed: ${internalsExposed}${internalsExposed ? '  reason: R-16 addon bridge; expires 2027-01-24' : ''}`)
+  console.log(`addon available: ${addonAvailable}  version: ${addonVersion}  via: direct requireBuiltin probe`)
+}
+
 async function main(): Promise<void> {
+  reportInternalsDiagnostics()
   const runtimeDir = process.argv[2] as string
   const projectDir = process.argv[3] as string
   installOfficeEngineResolution(runtimeDir)
@@ -123,18 +145,28 @@ async function main(): Promise<void> {
   })
   process.once('disconnect', () => { void stop() })
   const { ctx } = await application
-  control.updateTasks = installDesktopUpdateTaskControl(ctx)
-  control.quitInspection = installDesktopQuitInspection(ctx)
-  await ctx.plugin(desktopOffice, {
-    runtimeDir,
-    source: process.argv[4] ?? join(runtimeDir, '..', 'runtime', 'primary-runtime'),
-    root: join(resolveDshHome(), 'dsh-runtimes', 'dsh-primary-runtime'),
-  })
-  installPlatformSessionPublisher(ctx, (session) => {
-    if (process.connected) process.send?.({ type: 'platform-session', session })
-  })
+  // Startup tail transaction: a shutdown or disconnect that raced the boot must not
+  // register anything or report ready; once stopping is set, stop() owns the tree.
+  if (stopping !== undefined || !process.connected) return
+  try {
+    control.updateTasks = installDesktopUpdateTaskControl(ctx)
+    control.quitInspection = installDesktopQuitInspection(ctx)
+    await ctx.plugin(desktopOffice, {
+      runtimeDir,
+      source: process.argv[4] ?? join(runtimeDir, '..', 'runtime', 'primary-runtime'),
+      root: join(resolveDshHome(), 'dsh-runtimes', 'dsh-primary-runtime'),
+    })
+    installPlatformSessionPublisher(ctx, (session) => {
+      if (process.connected) process.send?.({ type: 'platform-session', session })
+    })
+  } catch (error) {
+    // The context can complete disposal mid-tail (e.g. between the guard and a
+    // registration); nothing in the tail may outlive its context.
+    if (!(error instanceof CordisError) || error.code !== 'INACTIVE_EFFECT') throw error
+    return
+  }
   const url = ctx.connection.authenticatedUrl(`${ctx.webServer.protocol}//127.0.0.1:${String(ctx.webServer.port)}`)
-  if (process.connected) process.send?.({ type: 'ready', url, injections: ctx.webServer.collectIndexInjections(ctx.connection.browserPeer) }, (error) => { if (error !== null) console.error(error) })
+  if (stopping === undefined && process.connected) process.send?.({ type: 'ready', url, injections: ctx.webServer.collectIndexInjections(ctx.connection.browserPeer) }, (error) => { if (error !== null) console.error(error) })
 }
 
 /** Upper bound of the startup diagnostic carried over IPC; the head holds the message and stack. */

@@ -198,9 +198,11 @@ export class DesktopHostProcess {
   async start(): Promise<DesktopHostReady> {
     if (this.child !== undefined) return this.readyPromise
     const entry = join(this.runtimeDir, 'node_modules', '@deepseek-ai', 'dsh-desktop-host', 'lib', 'index.js')
-    // V8 internals are exposed only for workspace development (inspector attached) or an
-    // explicit operator opt-in; production starts the Host without the flag.
-    const exposeInternals = this.inspectPort !== undefined || this.environment.DSH_EXPOSE_INTERNALS === '1'
+    // R-16 bridge (see the release record): `node-addon-require-builtin@0.1.9` rejects the pinned
+    // Electron fingerprint, so the resolver falls back to native internals and the flag ships
+    // enabled by default. `DSH_EXPOSE_INTERNALS=0` opts a deployment out; the flag is removed
+    // again once an addon release whose matrix covers this Electron lands (expires 2027-01-24).
+    const exposeInternals = this.environment.DSH_EXPOSE_INTERNALS !== '0'
     const child = spawn(this.node, [
       ...(exposeInternals ? ['--expose-internals'] : []),
       ...(this.inspectPort === undefined ? [] : [`--inspect=127.0.0.1:${String(this.inspectPort)}`]),

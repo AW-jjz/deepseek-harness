@@ -102,6 +102,10 @@ export class HttpFetchProvider implements WebFetchProvider {
     const headers = {
       'user-agent': this.limits.userAgent,
       'accept': 'text/html,application/xhtml+xml,text/*;q=0.9,application/json;q=0.8',
+      // Never invite Brotli on untrusted responses while the host runtime sits inside the Node
+      // 2026-10 brotli security window; a server answering `content-encoding: br` anyway is
+      // rejected before its body is read (see readBody).
+      'accept-encoding': 'gzip, deflate, identity',
     }
     try {
       // Keep the Node-only transport out of browser-worker startup; a real request loads it here.
@@ -114,6 +118,15 @@ export class HttpFetchProvider implements WebFetchProvider {
 
   /** Read, byte-cap, classify, and decode the final response body. */
   private async readBody(response: Response, finalUrl: URL, signal: AbortSignal): Promise<WebFetchResult> {
+    // Reject Brotli before any body byte reaches the runtime's brotli decoder: the request never
+    // asks for it, so a compliant server cannot send it, and a non-compliant or malicious one
+    // must not get its payload decompressed here (Node 2026-10 brotli security window).
+    const contentEncoding = response.headers.get('content-encoding')
+    if (contentEncoding !== null && contentEncoding.toLowerCase().split(',').some(value => value.trim() === 'br')) {
+      await response.body?.cancel()
+      throw new WebError('response is Brotli encoded, which this provider does not accept', 'WEB_UNSUPPORTED_CONTENT_ENCODING')
+    }
+
     const contentType = response.headers.get('content-type')
     const kind = classifyContentType(contentType)
     if (kind === undefined) {
