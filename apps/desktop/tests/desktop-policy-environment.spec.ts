@@ -47,14 +47,18 @@ it('rejects login origins in production', () => {
     .toThrow('must not configure allowedAuthOrigins')
 })
 
-it.each([{ unsigned: true }, { prepareOnly: true }, {}])('requires policy outside local macOS builds in %j', (options) => {
+it.each([{ prepareOnly: true }, {}])('requires policy for builds that can be released in %j', (options) => {
   for (const platform of ['win32', 'darwin'] as const) {
-    if (platform === 'darwin' && options.unsigned) {
-      expect(() => { validateDesktopPackageEnvironment({ DSH_DESKTOP_APP_ID: 'com.example.test' }, { platform, arch: 'x64' }, options) })
-        .not.toThrow()
-      continue
-    }
     expect(() => { validateDesktopPackageEnvironment({ DSH_DESKTOP_APP_ID: 'com.example.test' }, { platform, arch: 'x64' }, options) })
       .toThrow('DSH_DESKTOP_MANDATORY_UPDATE_TEST_ORIGIN')
+  }
+})
+
+it('does not require a policy for an unsigned internal build on any platform', () => {
+  // An unsigned artifact ships neither an update feed nor a remote mandatory-update policy;
+  // baking one in is what made the S0 test build read as a release deployment.
+  for (const platform of ['win32', 'darwin'] as const) {
+    expect(() => { validateDesktopPackageEnvironment({ DSH_DESKTOP_APP_ID: 'com.example.test' }, { platform, arch: 'x64' }, { unsigned: true }) })
+      .not.toThrow()
   }
 })

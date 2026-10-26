@@ -66,7 +66,8 @@ it('fetches the macOS optional tarball only for Darwin, with an empty cache for 
     const bytes = await readFile(join(directory, 'package.tgz'))
     packages.set(name, { manifest, bytes })
     if (name === providerName) {
-      const result = await execa('tar', ['-tzf', join(directory, 'package.tgz')])
+      // List from inside the directory: MSYS GNU tar reads a `C:\...` argument as a remote host.
+      const result = await execa('tar', ['-tzf', 'package.tgz'], { cwd: directory })
       expect(result.stdout).toContain('package/native/bin/darwin-arm64/dsh-cua-native')
     }
   }
