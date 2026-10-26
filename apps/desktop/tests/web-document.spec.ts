@@ -36,7 +36,9 @@ it('sends the application document a policy that blocks remote script and remote
   const policy = document.headers.get('content-security-policy') ?? ''
   // Remote script is what an injected document would need; inline stays because the Host
   // injects startup code.
-  expect(policy).toContain("script-src 'self' 'unsafe-inline' blob:")
+  // Inline and eval stay: Host injections are inline, and the client plugin runner evaluates
+  // bundles at runtime. Remote script is what this policy actually removes.
+  expect(policy).toContain("script-src 'self' 'unsafe-inline' 'unsafe-eval' blob:")
   expect(policy).not.toContain('script-src *')
   // The client only talks to its own origin and the loopback Host.
   expect(policy).toContain("connect-src 'self'")

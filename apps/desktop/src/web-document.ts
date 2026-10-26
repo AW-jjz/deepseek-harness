@@ -21,12 +21,16 @@ const AUTHENTICATION_RETRY_MS = 500
 /**
  * Policy for the application document.
  *
- * It blocks the two things an injected document would otherwise be able to do without a
- * warning — load remote script and talk to a remote origin — while keeping what the client
- * actually uses: inline boot scripts and Host injections (`'unsafe-inline'`), blob workers for
- * upload/excel/pdf, the loopback Host over both HTTP and WebSocket, and remote images.
- * `'unsafe-inline'` is the deliberate limit here: the Host injects inline startup code, so
- * scripts are not nonce-gated yet.
+ * It blocks what an injected document would otherwise do without a warning: load script from a
+ * remote origin and talk to a remote origin. What the client actually uses stays allowed — inline
+ * boot scripts and Host injections, blob workers for upload/excel/pdf, the loopback Host over HTTP
+ * and WebSocket, and remote images.
+ *
+ * `'unsafe-inline' 'unsafe-eval'` are the deliberate limits. The Host injects inline startup code,
+ * and `cordis-client-runner` evaluates client plugin bundles at runtime by design
+ * (`packages/extensions/cordis-client-runner/src/client/evaluator.ts`), so a stricter script policy
+ * would blank the application. This policy is therefore defense-in-depth against remote loads, not
+ * a containment boundary against injected inline code.
  */
 export const APPLICATION_CONTENT_SECURITY_POLICY = [
   "default-src 'self'",
@@ -34,7 +38,7 @@ export const APPLICATION_CONTENT_SECURITY_POLICY = [
   "object-src 'none'",
   "form-action 'none'",
   "frame-src 'self'",
-  "script-src 'self' 'unsafe-inline' blob:",
+  "script-src 'self' 'unsafe-inline' 'unsafe-eval' blob:",
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data: blob: https:",
   "font-src 'self' data:",
