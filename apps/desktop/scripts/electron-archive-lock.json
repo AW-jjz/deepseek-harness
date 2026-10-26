@@ -1,0 +1,11 @@
+{
+  "version": "44.9.3",
+  "note": "Electron release archives pinned by sha256 from the official SHASUMS256.txt (cross-checked against the GitHub release). Bumping Electron means updating both the version and every hash here deliberately; prepare-runtime refuses an archive that does not match.",
+  "targets": {
+    "win32-x64": "41a1ffa0541cb0f2c9b9fe920dd2cef1793ad0ea2ada1a9582958880f4d1b23c",
+    "darwin-arm64": "4af51382278d00291dfcda265eddd9bab6e98cebb09f46aadc8438bf606de162",
+    "darwin-x64": "451363b59bb7d2c1c9e0c4baa99106004eaabe724aa21a0c6b4c87469293531a",
+    "linux-x64": "6e7fd2d450d442507b846ace4ae6e2bd17e1b1653e86a033b5231abfc23e6df4",
+    "linux-arm64": "8e70d53d920d84db869023280e5a1fbda82ecc58fea4443748e58309a3c80238"
+  }
+}
