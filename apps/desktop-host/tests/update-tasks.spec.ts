@@ -1,4 +1,5 @@
 import { Context } from '@deepseek-ai/cordis'
+import type { IncomingMessage, ServerResponse } from 'node:http'
 import { JobId, JobRegistry } from '@deepseek-ai/dsh-jobs'
 import type { JobStatus, JobView } from '@deepseek-ai/dsh-jobs'
 import { SessionId } from '@deepseek-ai/dsh-session/types'
@@ -68,15 +69,15 @@ describe('Desktop Host update task control', () => {
     vi.useFakeTimers()
     try {
       const hanging = new Promise<never>(() => {})
-      const response = { writeHead: vi.fn(), end: vi.fn() }
+      const response = { writeHead: vi.fn(), end: vi.fn() } as unknown as ServerResponse
       // Admit one request that never finishes; the lock must stop waiting at its budget.
-      ctx.emit('connection/request', {}, response, () => hanging)
+      ctx.emit('connection/request', {} as IncomingMessage, response, () => hanging)
       const locking = expect(control('lock')).rejects.toThrow(/did not finish draining/u)
       await vi.advanceTimersByTimeAsync(DRAIN_BUDGET_MS)
       await locking
       // The shell unlocks on failure; a later request must be served, not answered 503.
       await control('unlock')
-      ctx.emit('connection/request', {}, response, () => Promise.resolve())
+      ctx.emit('connection/request', {} as IncomingMessage, response, () => Promise.resolve())
       expect(response.writeHead).not.toHaveBeenCalledWith(503)
     } finally {
       vi.useRealTimers()
@@ -88,8 +89,8 @@ describe('Desktop Host update task control', () => {
     try {
       expect(await control('lock')).toBe(false)
       await vi.advanceTimersByTimeAsync(LOCK_STALE_MS)
-      const response = { writeHead: vi.fn(), end: vi.fn() }
-      ctx.emit('connection/request', {}, response, () => Promise.resolve())
+      const response = { writeHead: vi.fn(), end: vi.fn() } as unknown as ServerResponse
+      ctx.emit('connection/request', {} as IncomingMessage, response, () => Promise.resolve())
       expect(response.writeHead).not.toHaveBeenCalledWith(503)
     } finally {
       vi.useRealTimers()

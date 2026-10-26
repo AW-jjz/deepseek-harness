@@ -9,10 +9,13 @@ import {
   realpathSync,
   closeSync,
   readFileSync,
+  renameSync,
   unlinkSync,
   writeFileSync,
   writeSync,
 } from 'node:fs'
+import { randomUUID } from 'node:crypto'
+import { uptime } from 'node:os'
 import { join } from 'node:path'
 import {
   DESKTOP_HOST_PACKAGE,
@@ -28,6 +31,124 @@ import { PROFILE_TEMPLATES, type ProfileTemplate } from '@deepseek-ai/dsh-offici
 const PROJECT_NAME = '@deepseek-ai/dsh-desktop-runtime'
 const DSH_PACKAGE = '@deepseek-ai/dsh'
 const CORE_BUILD_PACKAGE = '@deepseek-ai/dsh-subprocess-local'
+
+/** A lock younger than this is trusted even when its recorded owner looks dead. */
+const LOCK_MIN_STALE_AGE_MS = 2_000
+
+/** One profile lock record: who holds it, and which boot wrote it. */
+interface ProfileLockOwner {
+  readonly pid: number
+  readonly token: string
+  /** Machine boot time in epoch milliseconds; a lock written before a reboot cannot be live. */
+  readonly bootId: number
+  /** File age source, so a very fresh lock is never taken over on a PID race. */
+  readonly ageMs: number
+}
+
+/** Machine boot time in epoch milliseconds, stable for the lifetime of one boot. */
+function machineBootId(): number {
+  return Math.round(Date.now() - uptime() * 1_000)
+}
+
+/**
+ * Read one lock record.
+ * @param path - Lock file to read.
+ * @returns The owner, or undefined when the file is unreadable or malformed.
+ */
+function readLockOwner(path: string): ProfileLockOwner | undefined {
+  let raw: string
+  try { raw = readFileSync(path, 'utf8') } catch { return undefined }
+  const ageMs = (() => { try { return Date.now() - lstatSync(path).mtimeMs } catch { return 0 } })()
+  const trimmed = raw.trim()
+  // Locks written before the record carried a token hold a bare pid; keep judging them the
+  // same way so an upgrade does not turn an existing live lock into a takeover target.
+  if (/^\d+$/u.test(trimmed)) {
+    const pid = Number(trimmed)
+    if (!Number.isSafeInteger(pid) || pid <= 0) return undefined
+    return { pid, token: `legacy:${trimmed}`, bootId: 0, ageMs }
+  }
+  try {
+    const parsed: unknown = JSON.parse(trimmed)
+    if (typeof parsed !== 'object' || parsed === null) return undefined
+    const record = parsed as Record<string, unknown>
+    if (typeof record.pid !== 'number' || !Number.isSafeInteger(record.pid) || record.pid <= 0) return undefined
+    if (typeof record.token !== 'string' || record.token === '') return undefined
+    const bootId = typeof record.bootId === 'number' ? record.bootId : 0
+    return { pid: record.pid, token: record.token, bootId, ageMs }
+  } catch { return undefined }
+}
+
+/**
+ * Whether a lock holder is still running.
+ *
+ * A PID alone is not identity: after a crash and reboot the number can belong to a
+ * different process. A record written during an earlier boot is therefore always stale.
+ * A record we wrote ourselves is additionally trusted for its first moments, so a
+ * simultaneous start cannot take over a lock whose owner is still booting.
+ * @param owner - Lock record to judge.
+ * @returns true while the recorded owner may still hold the profile.
+ */
+function isLockOwnerLive(owner: ProfileLockOwner): boolean {
+  if (owner.bootId !== 0 && owner.ageMs < LOCK_MIN_STALE_AGE_MS) return true
+  if (owner.bootId !== 0 && Math.abs(owner.bootId - machineBootId()) > 60_000) return false
+  try {
+    process.kill(owner.pid, 0)
+    return true
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code !== 'ESRCH'
+  }
+}
+
+/**
+ * Create the profile lock or take over a provably stale one.
+ *
+ * The takeover is a rename of the exact lock that was judged stale, so two contenders
+ * cannot both claim it and neither can delete a lock another process just created. The
+ * winner writes its own token and later removes the file only while that token is still
+ * its own.
+ * @param lockPath - Lock file path under the real profile directory.
+ * @returns The open descriptor holding the new lock, plus its token.
+ * @throws When another live operation holds the profile.
+ */
+function acquireProfileLock(lockPath: string): { descriptor: number; token: string } {
+  const token = randomUUID()
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const descriptor = openSync(lockPath, 'wx', 0o600)
+      writeSync(descriptor, JSON.stringify({ pid: process.pid, token, bootId: machineBootId() }))
+      fsyncSync(descriptor)
+      return { descriptor, token }
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
+      const lock = lstatSync(lockPath)
+      if (lock.isSymbolicLink() || !lock.isFile()) throw new Error('desktop project: profile lock is not a regular file')
+      const owner = readLockOwner(lockPath)
+      // An unreadable record stays fail-closed: guessing here is how a profile gets
+      // corrupted by two writers, and the message tells the user what to do.
+      if (owner === undefined) {
+        throw new Error('desktop project: another profile operation is active (unreadable lock; remove it if no operation is running)')
+      }
+      if (isLockOwnerLive(owner)) throw new Error('desktop project: another profile operation is active')
+      // Rename is atomic: exactly one contender moves this inode out of the way.
+      const quarantine = `${lockPath}.stale-${randomUUID()}`
+      try {
+        renameSync(lockPath, quarantine)
+      } catch (renameError) {
+        // Someone else already took it over; retry creation against the new state.
+        if ((renameError as NodeJS.ErrnoException).code === 'ENOENT') continue
+        throw renameError
+      }
+      const moved = readLockOwner(quarantine)
+      if (moved !== undefined && moved.token !== owner.token) {
+        // The inode changed between the check and the rename: put nothing back, keep the
+        // displaced record for inspection and let the live owner finish.
+        throw new Error('desktop project: another profile operation is active')
+      }
+      unlinkSync(quarantine)
+    }
+  }
+  throw new Error('desktop project: another profile operation is active')
+}
 const WEB_PROFILE = PROFILE_TEMPLATES.web as ProfileTemplate
 const WORKSPACE_SETTINGS = 'nodeLinker: hoisted\nautoInstallPeers: false\n'
 function writeJson(path: string, value: unknown): void {
@@ -92,39 +213,14 @@ export class DesktopProjectManager {
   private async withLock<T>(operation: () => T | Promise<T>): Promise<T> {
     mkdirSync(this.paths.profile, { recursive: true, mode: 0o700 })
     const lockPath = join(realpathSync(this.paths.profile), 'lock')
-    let descriptor: number
+    const { descriptor, token } = acquireProfileLock(lockPath)
     try {
-      descriptor = openSync(lockPath, 'wx', 0o600)
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
-        const lock = lstatSync(lockPath)
-        if (lock.isSymbolicLink() || !lock.isFile()) {
-          throw new Error('desktop project: profile lock is not a regular file')
-        }
-        const owner = Number.parseInt(readFileSync(lockPath, 'utf8').trim(), 10)
-        let active = !Number.isSafeInteger(owner) || owner <= 0
-        if (!active) {
-          try {
-            process.kill(owner, 0)
-            active = true
-          } catch (signalError) {
-            active = (signalError as NodeJS.ErrnoException).code !== 'ESRCH'
-          }
-        }
-        if (active) throw new Error('desktop project: another profile operation is active')
-        unlinkSync(lockPath)
-        descriptor = openSync(lockPath, 'wx', 0o600)
-      } else {
-        throw error
-      }
-    }
-    try {
-      writeSync(descriptor, `${String(process.pid)}\n`)
-      fsyncSync(descriptor)
       return await operation()
     } finally {
       closeSync(descriptor)
-      unlinkSync(lockPath)
+      // Only remove the lock this acquisition wrote: a takeover by another process must not
+      // be undone by the process it displaced.
+      if (readLockOwner(lockPath)?.token === token) unlinkSync(lockPath)
     }
   }
 }

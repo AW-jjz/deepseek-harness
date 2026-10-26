@@ -1,5 +1,5 @@
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, unlinkSync, utimesSync, writeFileSync } from 'node:fs'
+import { tmpdir, uptime } from 'node:os'
 import { dirname, join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { resolveDesktopPaths } from '../src/paths.ts'
@@ -307,6 +307,27 @@ describe.each(['applyRelease', 'disableAllPlugins'] as const)('desktop profile l
     } finally {
       unlinkSync(manager.paths.lock)
     }
+  })
+
+  it('reclaims a record written during an earlier boot even when its pid is live again', async () => {
+    // The pid can belong to an unrelated process after a crash and reboot; the boot id, not
+    // the pid table, decides that the record cannot be live.
+    const { manager } = setup()
+    mkdirSync(manager.paths.profile, { recursive: true })
+    writeFileSync(manager.paths.lock, JSON.stringify({ pid: process.pid, token: 'previous-boot', bootId: 1 }))
+    const old = new Date(Date.now() - 60_000)
+    utimesSync(manager.paths.lock, old, old)
+    await expect(manager[operation]()).resolves.toBeUndefined()
+    expect(existsSync(manager.paths.lock)).toBe(false)
+  })
+
+  it('keeps a fresh record written by another process of this boot', async () => {
+    const { manager } = setup()
+    mkdirSync(manager.paths.profile, { recursive: true })
+    // Same boot, live pid: the record is not old enough to be provably stale.
+    writeFileSync(manager.paths.lock, JSON.stringify({ pid: process.pid, token: 'concurrent', bootId: Math.round(Date.now() - uptime() * 1_000) }))
+    await expect(manager[operation]()).rejects.toThrow('another profile operation is active')
+    expect(JSON.parse(readFileSync(manager.paths.lock, 'utf8'))).toMatchObject({ token: 'concurrent' })
   })
 })
 
