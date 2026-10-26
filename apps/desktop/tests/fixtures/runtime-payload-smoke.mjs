@@ -140,7 +140,7 @@ function checkHtml() {
  */
 function requireInternalRuntime(moduleId) {
   if (process.execArgv.includes('--expose-internals')) {
-    try { return { via: 'flag', module: require(moduleId) } } catch { /* fall through to the addon */ }
+    try { return { via: 'flag', module: requireRuntime(moduleId) } } catch { /* fall through to the addon */ }
   }
   const addon = requireRuntime('node-addon-require-builtin')
   return { via: 'addon', module: addon.requireBuiltin(moduleId) }
