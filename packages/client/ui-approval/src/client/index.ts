@@ -83,9 +83,8 @@ export function apply(ctx: ClientContext): void {
     scope.effect(() => scope.shortcuts.registerFixed({
       id: 'approval.allow' as ShortcutCommandId, label: () => t('allow'), keys: ['Enter'], bindings: [{ code: 'Enter', modifiers: [] }], group: 'approval',
     }), 'ui-approval: fixed allow reference')
-    scope.effect(() => scope.shortcuts.registerFixed({
-      id: 'approval.reject' as ShortcutCommandId, label: () => t('reject'), keys: ['Esc'], bindings: [{ code: 'Escape', modifiers: [] }], group: 'approval',
-    }), 'ui-approval: fixed reject reference')
+    // Rejecting has no key binding: a stray Escape must not decide a tool call, and the
+    // reference list therefore advertises only Enter.
   })
   const registerPendingInteraction = ctx.uiSession.registerPendingInteraction<PendingApproval>(
     () => 0,

@@ -22,9 +22,21 @@ function ApprovalFlow(props: FactoryComponentPropsOf<'conversation.approval.card
   const active = useRef(true)
   const composing = useRef(false)
   const compositionEnded = useRef(false)
+  const root = useRef<HTMLDivElement>(null)
+  const previousFocus = useRef<Element | null>(null)
   useEffect(() => {
     active.current = true
     return () => { active.current = false }
+  }, [])
+  // The card takes focus when it appears (the composer was hidden, so the previous focus
+  // target may no longer be reachable) and hands it back when the decision lands.
+  useEffect(() => {
+    previousFocus.current = document.activeElement
+    root.current?.querySelector<HTMLElement>('[data-approval-primary]')?.focus()
+    return () => {
+      const previous = previousFocus.current
+      if (previous instanceof HTMLElement && previous.isConnected) previous.focus()
+    }
   }, [])
   const answer = (send: () => Promise<void>): void => {
     if (waiting.current || !canAnswer()) return
@@ -40,17 +52,20 @@ function ApprovalFlow(props: FactoryComponentPropsOf<'conversation.approval.card
     const element = event.target as Element
     if (event.defaultPrevented || !event.currentTarget.contains(document.activeElement)
       || element.closest('input, textarea, select, [contenteditable="true"], [contenteditable=""]') !== null) return
-    if (event.key !== 'Enter' && event.key !== 'Escape') return
-    if (event.key === 'Enter' && element.closest('button, a[href], [role="button"]') !== null) return
+    // Escape is not a decision: a stray key must never reject a tool call. Only Enter, which
+    // the user has to aim at the card, allows the request.
+    if (event.key !== 'Enter') return
+    if (element.closest('button, a[href], [role="button"]') !== null) return
     if (event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) return
     event.preventDefault()
     event.stopPropagation()
-    // oxlint-disable-next-line typescript/no-deprecated -- IME 229 covers engines without isComposing.
     if (event.repeat || composing.current || compositionEnded.current || event.nativeEvent.isComposing || event.keyCode === 229) return
-    answer(event.key === 'Enter' ? onAllow : onReject)
+    answer(onAllow)
   }
   return (
-    <div className={css.root} data-approval-key={requestKey} aria-busy={answered}
+    <div ref={root} className={css.root} data-approval-key={requestKey} aria-busy={answered}
+      role="alertdialog"
+      aria-label={title}
       onKeyDown={keydown}
       onKeyUpCapture={() => { compositionEnded.current = false }}
       onCompositionStartCapture={() => { composing.current = true }}
@@ -76,7 +91,7 @@ function ApprovalFlow(props: FactoryComponentPropsOf<'conversation.approval.card
           <Button variant="outline" className={css.reject} disabled={answered} onClick={() => { answer(onReject) }}>
             {t('reject')}
           </Button>
-          <Button variant={onAlways === undefined ? 'primary' : 'outline'} disabled={answered} onClick={() => { answer(onAllow) }}>
+          <Button data-approval-primary="" variant={onAlways === undefined ? 'primary' : 'outline'} disabled={answered} onClick={() => { answer(onAllow) }}>
             {allowLabel ?? t('allowOnce')}
           </Button>
           {onAlways !== undefined && <Button variant="primary" disabled={answered} onClick={() => { answer(onAlways) }}>

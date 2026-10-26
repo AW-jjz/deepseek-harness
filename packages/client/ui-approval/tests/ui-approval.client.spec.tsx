@@ -218,7 +218,8 @@ describe('approval Remote Event consumer', () => {
     expect(next).toHaveBeenCalledOnce()
     expect(bench.pending.getSnapshot()).toEqual([])
     expect(bench.register).toHaveBeenCalledOnce()
-    expect(bench.shortcuts.mock.calls.map(([entry]) => entry.label())).toEqual(['allow', 'reject'])
+    // Rejecting is a button; no key binding is advertised for it.
+    expect(bench.shortcuts.mock.calls.map(([entry]) => entry.label())).toEqual(['allow'])
   })
 
   it('publishes one scoped takeover, returns the answer, and keeps stable registrations', async () => {
@@ -395,22 +396,40 @@ describe('ApprovalPanel', () => {
     expect(pending.reason).toBe('audit reason')
   })
 
-  it.each([['Enter', 'allowed-once'], ['Escape', 'rejected']] as const)(
-    'answers the focused container with %s through the pending request', async (key, outcome) => {
-      const pending = new PendingApproval(id('s1'), { toolName: 'bash' })
-      render(<ApprovalPanel {...panelProps(pending)} />)
-      const group = screen.getByRole('group', { name: 'Approval details' })
-      group.focus()
-      const bubbled = vi.fn()
-      window.addEventListener('keydown', bubbled)
-      try {
-        fireEvent.keyDown(group, { key, code: key })
-        await expect(pending.result).resolves.toBe(outcome)
-        expect(bubbled).not.toHaveBeenCalled()
-        expect(pending.answerable).toBe(false)
-      } finally { window.removeEventListener('keydown', bubbled) }
-    },
-  )
+  it('answers the focused container with Enter through the pending request', async () => {
+    const pending = new PendingApproval(id('s1'), { toolName: 'bash' })
+    render(<ApprovalPanel {...panelProps(pending)} />)
+    const group = screen.getByRole('group', { name: 'Approval details' })
+    group.focus()
+    const bubbled = vi.fn()
+    window.addEventListener('keydown', bubbled)
+    try {
+      fireEvent.keyDown(group, { key: 'Enter', code: 'Enter' })
+      await expect(pending.result).resolves.toBe('allowed-once')
+      expect(bubbled).not.toHaveBeenCalled()
+      expect(pending.answerable).toBe(false)
+    } finally { window.removeEventListener('keydown', bubbled) }
+  })
+
+  it('never rejects from Escape and focuses the allow action when the card appears', async () => {
+    const pending = new PendingApproval(id('s1'), { toolName: 'bash' })
+    const before = document.createElement('button')
+    document.body.append(before)
+    before.focus()
+    const { unmount } = render(<ApprovalPanel {...panelProps(pending)} />)
+    try {
+      // The composer is hidden while the card is up; focus lands on the primary action.
+      expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Allow once' }))
+      // A stray Escape must not decide anything.
+      fireEvent.keyDown(document.activeElement!, { key: 'Escape', code: 'Escape' })
+      fireEvent.keyDown(screen.getByRole('group', { name: 'Approval details' }), { key: 'Escape', code: 'Escape' })
+      expect(pending.answerable).toBe(true)
+      const dialog = screen.getByRole('alertdialog')
+      expect(dialog.getAttribute('aria-label')).toBeTruthy()
+    } finally { unmount() }
+    // The previous focus target gets the keyboard back.
+    expect(document.activeElement).toBe(before)
+  })
 
   it('leaves button Enter to its native click and rejects from the reject button', async () => {
     const pending = new PendingApproval(id('s1'), { toolName: 'bash' })
@@ -429,7 +448,12 @@ describe('ApprovalPanel', () => {
     const renderSlot = () => <input aria-label="Approval input" />
     render(<ApprovalPanel {...panelProps(pending, renderSlot)} />)
     const group = screen.getByRole('group', { name: 'Approval details' })
+    // Keys pressed while focus is outside the card are not the card's to answer.
+    const outside = document.createElement('button')
+    document.body.append(outside)
+    outside.focus()
     fireEvent.keyDown(group, { key: 'Enter', code: 'Enter' })
+    outside.remove()
     expect(pending.answerable).toBe(true)
     const input = screen.getByRole('textbox', { name: 'Approval input' })
     input.focus()
