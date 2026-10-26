@@ -4825,6 +4825,14 @@ export const EVENT_API: readonly EventApiEntry[] = [
     parameters: [{ name: 'table', description: 'Mutable row table; listeners append in activation order.' }, { name: 'peer', description: 'The Peer the rendered page speaks for.' }],
   },
   {
+    name: 'webserver/upgrade',
+    mode: 'waterfall',
+    signature: '\'webserver/upgrade\'(request: IncomingMessage, socket: Duplex, head: Buffer, next: () => Promise<void>): Promise<void>',
+    summary: 'Admit or veto one registered upgrade before its route handler owns the socket.',
+    description: 'Admit or veto one registered upgrade before its route handler owns the socket.\n\nA listener that does not delegate keeps the socket and must answer or destroy it, because the route handler never runs. A Host about to be replaced uses this seam to refuse a socket that could otherwise start new work in the middle of an install.',
+    parameters: [{ name: 'request', description: 'The upgrade request as received.' }, { name: 'socket', description: 'The raw socket, still unowned by any protocol.' }, { name: 'head', description: 'Bytes already read past the request headers.' }, { name: 'next', description: 'Delegate to the next listener or the registered route.' }],
+  },
+  {
     name: 'workflow/agent-end',
     mode: 'emit',
     signature: '\'workflow/agent-end\'(info: WorkflowRunInfo, agent: WorkflowAgentEndInfo): void',

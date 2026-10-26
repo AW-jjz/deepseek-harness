@@ -901,6 +901,8 @@ export const FOUNDATION_TYPE_NAMES: ReadonlySet<string> = new Set([
   'Response',
   'IncomingMessage',
   'ServerResponse',
+  'Buffer',
+  'Duplex',
   'ReturnType',
   'Uint8Array',
 ])

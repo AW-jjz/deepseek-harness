@@ -344,4 +344,30 @@ Collect the structured index injection table for the page `peer` speaks for. Emi
 ```
 
 Source: [`packages/host/webserver/src/index.ts`](../../packages/host/webserver/src/index.ts)
+
+<a id="webserverupgrade--waterfall"></a>
+
+#### `webserver/upgrade` — waterfall
+
+Admit or veto one registered upgrade before its route handler owns the socket.
+
+A listener that does not delegate keeps the socket and must answer or destroy it, because the route handler never runs. A Host about to be replaced uses this seam to refuse a socket that could otherwise start new work in the middle of an install.
+
+```ts cordis-catalog
+/**
+ * Admit or veto one registered upgrade before its route handler owns the socket.
+ *
+ * A listener that does not delegate keeps the socket and must answer or destroy it, because
+ * the route handler never runs. A Host about to be replaced uses this seam to refuse a
+ * socket that could otherwise start new work in the middle of an install.
+ * @param request - The upgrade request as received.
+ * @param socket - The raw socket, still unowned by any protocol.
+ * @param head - Bytes already read past the request headers.
+ * @param next - Delegate to the next listener or the registered route.
+ * @mode waterfall
+ */
+'webserver/upgrade'(request: IncomingMessage, socket: Duplex, head: Buffer, next: () => Promise<void>): Promise<void>
+```
+
+Source: [`packages/host/webserver/src/index.ts`](../../packages/host/webserver/src/index.ts)
 <!-- END GENERATED cordis-surface -->

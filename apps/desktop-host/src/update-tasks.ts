@@ -59,6 +59,14 @@ export function installDesktopUpdateTaskControl(ctx: Context): (action: 'inspect
       try { await next() }
       finally { pendingRequests.delete(finished.promise); finished.resolve() }
     })
+    // An existing WebSocket can start a new turn after the HTTP drain finished; refusing new
+    // sockets closes that window, because a live turn would also have to come through one.
+    ctx.on('webserver/upgrade', async (_request, socket, _head, next) => {
+      if (locked && lockedAt !== undefined && Date.now() - lockedAt >= LOCK_STALE_MS) releaseLock()
+      if (!locked) { await next(); return }
+      // Answer before the protocol handshake, then close: the shell is about to replace this Host.
+      socket.end('HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\nContent-Length: 0\r\n\r\n')
+    })
   } catch (error) {
     // A Host already disposing when startup reaches registration must not crash; the
     // inspector reports stopping so update admission fails closed instead of looping.

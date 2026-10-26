@@ -42,6 +42,19 @@ declare module '@deepseek-ai/cordis' {
      * @mode emit
      */
     'webserver/index-inject'(table: IndexInjection[], peer: PeerScope): void
+    /**
+     * Admit or veto one registered upgrade before its route handler owns the socket.
+     *
+     * A listener that does not delegate keeps the socket and must answer or destroy it, because
+     * the route handler never runs. A Host about to be replaced uses this seam to refuse a
+     * socket that could otherwise start new work in the middle of an install.
+     * @param request - The upgrade request as received.
+     * @param socket - The raw socket, still unowned by any protocol.
+     * @param head - Bytes already read past the request headers.
+     * @param next - Delegate to the next listener or the registered route.
+     * @mode waterfall
+     */
+    'webserver/upgrade'(request: IncomingMessage, socket: Duplex, head: Buffer, next: () => Promise<void>): Promise<void>
   }
 }
 
@@ -605,15 +618,13 @@ export class WebServer extends Service {
           return
         }
         this.upgradedSockets.add(socket)
-        try {
-          Promise.resolve(route.handler(req, socket, head)).catch((error: unknown) => {
+        // The waterfall decides whether this socket reaches its route: a listener may answer
+        // or destroy it to refuse new connections while the owner is shutting down.
+        void this.ctx.waterfall('webserver/upgrade', req, socket, head, () => Promise.resolve(route.handler(req, socket, head)))
+          .catch((error: unknown) => {
             this.ctx.logger.warn(error instanceof Error ? error : new Error(String(error)))
             socket.destroy()
           })
-        } catch (error) {
-          this.ctx.logger.warn(error instanceof Error ? error : new Error(String(error)))
-          socket.destroy()
-        }
       })
 
       await new Promise<void>((resolve, reject) => {

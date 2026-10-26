@@ -97,6 +97,23 @@ describe('Desktop Host update task control', () => {
     }
   })
 
+  it('refuses a new upgrade while the update lock is held', async () => {
+    // An existing socket could start another turn after the HTTP drain; refusing new sockets
+    // closes that window.
+    expect(await control('lock')).toBe(false)
+    const socket = { end: vi.fn(), destroy: vi.fn() }
+    let delegated = false
+    ctx.emit('webserver/upgrade', {} as IncomingMessage, socket as never, Buffer.alloc(0), async () => { delegated = true })
+    await new Promise(resolve => setTimeout(resolve, 10))
+    expect(delegated).toBe(false)
+    expect(socket.end).toHaveBeenCalledWith(expect.stringContaining('503'))
+    // Unlocked again: the same socket would reach its route.
+    await control('unlock')
+    ctx.emit('webserver/upgrade', {} as IncomingMessage, socket as never, Buffer.alloc(0), async () => { delegated = true })
+    await new Promise(resolve => setTimeout(resolve, 10))
+    expect(delegated).toBe(true)
+  })
+
   it('survives registration on a context that is already unloading and fails closed', async () => {
     // The regression under test: a shutdown that starts unloading the boot context before
     // registration must not crash the Host through the update-task installer either.
