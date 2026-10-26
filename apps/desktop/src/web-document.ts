@@ -9,8 +9,14 @@ const MIME: Readonly<Record<string, string>> = {
 }
 const BOOT = '<script>globalThis.__DSH_BOOT_READY__ = Promise.withResolvers()</script>'
 
-/** Deadline for the Host authentication exchange; the window cannot open before it finishes. */
+/** Deadline for one Host authentication exchange; the window cannot open before it finishes. */
 export const AUTHENTICATION_TIMEOUT_MS = 5_000
+
+/** Attempts before startup reports the Host as unreachable. */
+export const AUTHENTICATION_ATTEMPTS = 3
+
+/** Pause between attempts; a cold profile can block the Host loop for a moment after `ready`. */
+const AUTHENTICATION_RETRY_MS = 500
 
 /**
  * Read an application-owned static asset; the index waits for asynchronous Host injections.
@@ -43,18 +49,31 @@ export async function serveWebDocument(request: Request, root: string): Promise<
  *
  * The exchange runs before the window may show the application, so a Host that accepts the
  * connection but never answers would otherwise leave startup waiting forever with no state
- * the shell can report. The deadline turns that into a startup failure with a message.
+ * the shell can report. Each attempt is bounded, and a transport failure is retried: the Host
+ * reports `ready` before its loop is free, so a cold profile can miss one short deadline.
+ * A non-303 answer is final — it describes the Host's own refusal, not a slow machine.
  * @param url - Authenticated URL reported by the owned Host process.
- * @param timeoutMs - Deadline for the whole exchange; defaults to {@link AUTHENTICATION_TIMEOUT_MS}.
+ * @param timeoutMs - Deadline for one exchange; defaults to {@link AUTHENTICATION_TIMEOUT_MS}.
  * @returns Cookie header for requests forwarded to that Host.
  */
 export async function authenticateWebHost(url: string, timeoutMs = AUTHENTICATION_TIMEOUT_MS): Promise<string> {
-  const response = await fetch(url, { redirect: 'manual', signal: AbortSignal.timeout(timeoutMs) })
-  const cookie = response.headers.get('set-cookie')
-  await response.body?.cancel()
-  if (response.status !== 303 || cookie === null) throw new Error('Desktop Host authentication failed')
-  const end = cookie.indexOf(';')
-  return end < 0 ? cookie : cookie.slice(0, end)
+  let lastError: unknown
+  for (let attempt = 0; attempt < AUTHENTICATION_ATTEMPTS; attempt++) {
+    if (attempt > 0) await new Promise(resolve => setTimeout(resolve, AUTHENTICATION_RETRY_MS))
+    let response: Response
+    try {
+      response = await fetch(url, { redirect: 'manual', signal: AbortSignal.timeout(timeoutMs) })
+    } catch (error) {
+      lastError = error
+      continue
+    }
+    const cookie = response.headers.get('set-cookie')
+    await response.body?.cancel()
+    if (response.status !== 303 || cookie === null) throw new Error('Desktop Host authentication failed')
+    const end = cookie.indexOf(';')
+    return end < 0 ? cookie : cookie.slice(0, end)
+  }
+  throw lastError instanceof Error ? lastError : new Error('Desktop Host authentication failed')
 }
 
 /**

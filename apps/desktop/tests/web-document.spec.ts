@@ -47,6 +47,24 @@ it('gives the Host authentication exchange a deadline instead of hanging startup
   expect(fetch.mock.calls[0]?.[1]?.signal).toBeInstanceOf(AbortSignal)
 })
 
+it('retries a deadline that a cold profile missed but not a refused exchange', async () => {
+  // The Host reports ready before its loop is free: the first attempt can time out while the
+  // profile is still reconciling, and the next one succeeds.
+  const fetch = vi.fn()
+    .mockImplementationOnce((_url: string, init?: RequestInit) => new Promise<Response>((_resolve, reject) => {
+      init?.signal?.addEventListener('abort', () => { reject(init.signal?.reason as Error) })
+    }))
+    .mockResolvedValueOnce(new Response(null, { status: 303, headers: { 'set-cookie': 'session=recovered; HttpOnly' } }))
+  vi.stubGlobal('fetch', fetch)
+  expect(await authenticateWebHost('http://127.0.0.1:1234/?token=owned', 20)).toBe('session=recovered')
+  expect(fetch).toHaveBeenCalledTimes(2)
+  // A refusal is the Host's answer, not a slow machine: no retry.
+  const refusing = vi.fn().mockResolvedValue(new Response('no', { status: 401 }))
+  vi.stubGlobal('fetch', refusing)
+  await expect(authenticateWebHost('http://127.0.0.1:1234/?token=owned', 20)).rejects.toThrow('authentication failed')
+  expect(refusing).toHaveBeenCalledOnce()
+})
+
 it('forwards upload bytes and cancellation with Host credentials while keeping the response streaming', async () => {
   const body = new ReadableStream({ start(controller) { controller.enqueue(new TextEncoder().encode('stream')); controller.close() } })
   const fetch = vi.fn().mockResolvedValue(new Response(body, { headers: { 'content-encoding': 'gzip', 'set-cookie': 'private' } }))
