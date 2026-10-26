@@ -153,7 +153,10 @@ export function createElectronBuilderConfig(
       'package.json',
       '!node_modules/**/*.{js,cjs,mjs,ts,cts,mts,css}.map',
       '!node_modules/**/*.tsbuildinfo',
-      { from: buildPaths.dsh, to: 'dsh', filter: ['**/*'] },
+      // The payload runs from compiled `lib/*.js`: TypeScript sources are build inputs, not
+      // runtime assets, and shipping them cost roughly 32 MiB of the packed archive.
+      // Markdown stays: bundled skills read their SKILL.md at runtime.
+      { from: buildPaths.dsh, to: 'dsh', filter: ['**/*', '!**/*.ts', '!**/*.ts.map'] },
       // electron-builder excludes a source directory's root node_modules.
       { from: join(buildPaths.dsh, 'node_modules'), to: 'dsh/node_modules', filter: ['**/*'] },
     ],
