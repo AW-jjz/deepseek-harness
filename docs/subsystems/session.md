@@ -934,6 +934,30 @@ workspaceDesktop(): { name: string; available: boolean; fileManager: 'finder' | 
 @Remote('rename') rename(request: SessionRenameRequest): Promise<SessionRenameValue>
 
 /**
+ * Remove one stored Session into the store's recovery copy.
+ *
+ * A live Agent owns its Session's write handle, so removing it under a running
+ * Turn would let the next append recreate what was just removed; the request is
+ * refused and the client is expected to close the Session first. The store
+ * itself still refuses an open handle, so the check is repeated where the
+ * artifacts actually live.
+ * @param request - the stored Session to remove.
+ * @param signal - caller lifetime; abort stops the removal before it starts.
+ * @returns where the recovery copy went, when the store keeps one.
+ * @throws RemoteError when the Session is live, missing, or the store cannot remove it.
+ */
+@Remote('delete') async delete(request: SessionDeleteRequest, signal: AbortSignal): Promise<SessionDeleteValue>
+
+/**
+ * Put one removed Session back into the store.
+ * @param request - the removed Session to restore.
+ * @param signal - caller lifetime; abort stops the restore before it starts.
+ * @returns where the Session was restored to.
+ * @throws RemoteError when no recovery copy exists or the store cannot restore it.
+ */
+@Remote('restore') async restore(request: SessionRestoreRequest, signal: AbortSignal): Promise<SessionRestoreValue>
+
+/**
  * Fork one cold-readable exact event prefix into a new Session. An omitted
  * boundary selects the latest completed-turn prefix; an open cut receives
  * synthetic fork closers.

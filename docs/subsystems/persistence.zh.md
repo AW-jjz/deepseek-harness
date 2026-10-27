@@ -448,6 +448,19 @@ delete?(id: SessionId, options?: SessionPersistenceDeleteOptions): Promise<Sessi
 sweepTrash?(retentionDays: number): Promise<number>
 
 /**
+ * Put one removed session back where it was.
+ *
+ * The undo path for {@link delete}: a backend that keeps a recovery copy
+ * resolves the removed session by id and restores its artifacts, refusing
+ * when a different session now occupies that identity.
+ * @param id - the removed session to restore.
+ * @param options - optional cancellation.
+ * @returns where the session was restored to.
+ * @throws {SessionPersistenceNotFoundError} when no recovery copy exists.
+ */
+restore?(id: SessionId, options?: SessionPersistenceDeleteOptions): Promise<{ restoredPath: string }>
+
+/**
  * Free bytes the backing store can still accept, or `undefined` when this
  * backend does not report free space.
  *

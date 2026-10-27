@@ -2338,6 +2338,20 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         returns: 'the accepted title and durable event sequence.',
       },
       {
+        signature: '@Remote(\'delete\') async delete(request: SessionDeleteRequest, signal: AbortSignal): Promise<SessionDeleteValue>',
+        description: 'Remove one stored Session into the store\'s recovery copy.\n\nA live Agent owns its Session\'s write handle, so removing it under a running Turn would let the next append recreate what was just removed; the request is refused and the client is expected to close the Session first. The store itself still refuses an open handle, so the check is repeated where the artifacts actually live.',
+        parameters: [{ name: 'request', description: 'the stored Session to remove.' }, { name: 'signal', description: 'caller lifetime; abort stops the removal before it starts.' }],
+        returns: 'where the recovery copy went, when the store keeps one.',
+        throws: ['RemoteError when the Session is live, missing, or the store cannot remove it.'],
+      },
+      {
+        signature: '@Remote(\'restore\') async restore(request: SessionRestoreRequest, signal: AbortSignal): Promise<SessionRestoreValue>',
+        description: 'Put one removed Session back into the store.',
+        parameters: [{ name: 'request', description: 'the removed Session to restore.' }, { name: 'signal', description: 'caller lifetime; abort stops the restore before it starts.' }],
+        returns: 'where the Session was restored to.',
+        throws: ['RemoteError when no recovery copy exists or the store cannot restore it.'],
+      },
+      {
         signature: '@Remote(\'fork\') async fork(request: SessionForkRequest): Promise<SessionForkValue>',
         description: 'Fork one cold-readable exact event prefix into a new Session. An omitted boundary selects the latest completed-turn prefix; an open cut receives synthetic fork closers.',
         parameters: [{ name: 'request', description: 'source Session, optional exact inclusive event boundary, and migration preflight choice.' }],
@@ -2479,6 +2493,13 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         description: 'Remove recovery copies delete left older than a retention window.\n\nA backend without a recycle bin omits this. The sweep is destructive and runs where the backend chooses (the JSONL backend does it once at mount), so a store that is never opened does not accumulate copies.',
         parameters: [{ name: 'retentionDays', description: 'days a removed session stays recoverable; `0` disables the sweep.' }],
         returns: 'how many recovery copies were removed.',
+      },
+      {
+        signature: 'restore?(id: SessionId, options?: SessionPersistenceDeleteOptions): Promise<{ restoredPath: string }>',
+        description: 'Put one removed session back where it was.\n\nThe undo path for delete: a backend that keeps a recovery copy resolves the removed session by id and restores its artifacts, refusing when a different session now occupies that identity.',
+        parameters: [{ name: 'id', description: 'the removed session to restore.' }, { name: 'options', description: 'optional cancellation.' }],
+        returns: 'where the session was restored to.',
+        throws: ['{SessionPersistenceNotFoundError} when no recovery copy exists.'],
       },
       {
         signature: 'availableBytes?(): Promise<number | undefined>',
@@ -7480,8 +7501,16 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface SessionCreateValue {\n    readonly sessionId: SessionId;\n    readonly agentPreset?: string;\n}',
   },
   {
+    name: 'SessionDeleteRequest',
+    declaration: 'export interface SessionDeleteRequest {\n    readonly sessionId: SessionId;\n}',
+  },
+  {
     name: 'SessionDeleteResult',
     declaration: 'export interface SessionDeleteResult {\n    readonly trashedPath?: string;\n}',
+  },
+  {
+    name: 'SessionDeleteValue',
+    declaration: 'export interface SessionDeleteValue {\n    readonly trashedPath?: string;\n}',
   },
   {
     name: 'SessionEndInput',
@@ -7826,6 +7855,14 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'SessionRequestId',
     declaration: 'export type SessionRequestId = Branded<\'session-request-id\'>;',
+  },
+  {
+    name: 'SessionRestoreRequest',
+    declaration: 'export interface SessionRestoreRequest {\n    readonly sessionId: SessionId;\n}',
+  },
+  {
+    name: 'SessionRestoreValue',
+    declaration: 'export interface SessionRestoreValue {\n    readonly restoredPath: string;\n}',
   },
   {
     name: 'SessionResultFilter',

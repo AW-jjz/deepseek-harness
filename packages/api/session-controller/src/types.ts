@@ -298,6 +298,30 @@ export interface SessionRenameValue {
   readonly seq: number
 }
 
+/** Request to remove one stored Session. */
+export interface SessionDeleteRequest {
+  /** Stored Session to remove; a live Agent for it refuses the request. */
+  readonly sessionId: SessionId
+}
+
+/** Confirmation that the Session left the store, with where its recovery copy went. */
+export interface SessionDeleteValue {
+  /** Backend-owned recovery copy, when the store keeps one. */
+  readonly trashedPath?: string
+}
+
+/** Request to put one removed Session back. */
+export interface SessionRestoreRequest {
+  /** Removed Session to restore. */
+  readonly sessionId: SessionId
+}
+
+/** Confirmation that the Session is back in the store. */
+export interface SessionRestoreValue {
+  /** Absolute directory the Session was restored to. */
+  readonly restoredPath: string
+}
+
 /** Session fork request. */
 export interface SessionForkRequest {
   readonly sessionId: SessionId

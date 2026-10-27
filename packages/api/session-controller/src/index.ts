@@ -10,9 +10,10 @@ import { errorChain, ReasoningEffortId, type MessageSource } from '@deepseek-ai/
 import type {} from '@deepseek-ai/dsh-client-file-upload'
 import { canOpenNativePath, nativeFileManager, nativeFileApplications, openNativeFileApplication, openNativeAssociatedPath, revealNativePath } from '@deepseek-ai/dsh-native-command'
 import type { SessionId } from '@deepseek-ai/dsh-session'
+import { SessionPersistenceNotFoundError } from '@deepseek-ai/dsh-session-persistence'
 import type {} from '@deepseek-ai/dsh-session-projection-cache'
 import { SessionQueryError, type SessionObservation } from '@deepseek-ai/dsh-session-query'
-import { Remote, RemoteError, TypertRemoteService, principalOf, type TypertResourceResolveInput } from '@deepseek-ai/dsh-typert-protocol'
+import { Remote, RemoteError, TypertRemoteService, principalOf, remoteErrorOf, type TypertResourceResolveInput } from '@deepseek-ai/dsh-typert-protocol'
 import { canonicalClientTimeZone } from '@deepseek-ai/dsh-util-time'
 import { assertNever } from '@deepseek-ai/dsh-util-values'
 import type {} from '@deepseek-ai/dsh-api-remote-access'
@@ -54,6 +55,10 @@ import type {
   SessionPromptValue,
   SessionRenameRequest,
   SessionRenameValue,
+  SessionDeleteRequest,
+  SessionDeleteValue,
+  SessionRestoreRequest,
+  SessionRestoreValue,
   SessionSearchRequest,
   SessionSearchValue,
   SessionStoreRevealValue,
@@ -447,6 +452,77 @@ export class SessionController extends TypertRemoteService {
   @Remote('rename')
   rename(request: SessionRenameRequest): Promise<SessionRenameValue> {
     return this.commands.rename(request)
+  }
+
+  /**
+   * Remove one stored Session into the store's recovery copy.
+   *
+   * A live Agent owns its Session's write handle, so removing it under a running
+   * Turn would let the next append recreate what was just removed; the request is
+   * refused and the client is expected to close the Session first. The store
+   * itself still refuses an open handle, so the check is repeated where the
+   * artifacts actually live.
+   * @param request - the stored Session to remove.
+   * @param signal - caller lifetime; abort stops the removal before it starts.
+   * @returns where the recovery copy went, when the store keeps one.
+   * @throws RemoteError when the Session is live, missing, or the store cannot remove it.
+   */
+  @Remote('delete')
+  async delete(request: SessionDeleteRequest, signal: AbortSignal): Promise<SessionDeleteValue> {
+    const remove = this.ctx.get('sessionPersistence')?.delete
+    if (remove === undefined) {
+      throw new RemoteError('session/store-unavailable', 'this deployment cannot remove stored sessions', {})
+    }
+    if (this.ctx.agents.get(request.sessionId) !== undefined) {
+      throw new RemoteError('session/agent-busy', 'close the session before removing it', { reason: 'live-agent' })
+    }
+    signal.throwIfAborted()
+    try {
+      return await remove.call(this.ctx.sessionPersistence, request.sessionId, { signal })
+    } catch (error: unknown) {
+      signal.throwIfAborted()
+      if (this.isMissingSession(error, request.sessionId)) {
+        throw new RemoteError('session/not-found', `session "${request.sessionId}" not found`, { sessionId: request.sessionId })
+      }
+      if (remoteErrorOf(error) !== undefined) throw error
+      throw new RemoteError('gateway/internal', 'session removal failed', {}, { cause: error })
+    }
+  }
+
+  /**
+   * Put one removed Session back into the store.
+   * @param request - the removed Session to restore.
+   * @param signal - caller lifetime; abort stops the restore before it starts.
+   * @returns where the Session was restored to.
+   * @throws RemoteError when no recovery copy exists or the store cannot restore it.
+   */
+  @Remote('restore')
+  async restore(request: SessionRestoreRequest, signal: AbortSignal): Promise<SessionRestoreValue> {
+    const restore = this.ctx.get('sessionPersistence')?.restore
+    if (restore === undefined) {
+      throw new RemoteError('session/store-unavailable', 'this deployment keeps no recoverable sessions', {})
+    }
+    signal.throwIfAborted()
+    try {
+      return await restore.call(this.ctx.sessionPersistence, request.sessionId, { signal })
+    } catch (error: unknown) {
+      signal.throwIfAborted()
+      if (this.isMissingSession(error, request.sessionId)) {
+        throw new RemoteError('session/not-found', `session "${request.sessionId}" has no recovery copy`, { sessionId: request.sessionId })
+      }
+      if (remoteErrorOf(error) !== undefined) throw error
+      throw new RemoteError('gateway/internal', 'session restore failed', {}, { cause: error })
+    }
+  }
+
+  /**
+   * Whether a store failure means the requested Session does not exist.
+   * @param error - the backend failure.
+   * @param sessionId - the Session the request named.
+   * @returns true for the store's own not-found error.
+   */
+  private isMissingSession(error: unknown, sessionId: SessionId): boolean {
+    return error instanceof SessionPersistenceNotFoundError && error.sessionId === sessionId
   }
 
   /**

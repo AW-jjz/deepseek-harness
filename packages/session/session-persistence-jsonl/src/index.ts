@@ -671,6 +671,53 @@ class JsonlSessionPersistence extends SessionPersistence {
   }
 
   /**
+   * Put one removed session back under its project directory.
+   *
+   * The trash entry name ends with the encoded id, so the entry is found by name
+   * without reading any log; the header then supplies the cwd that names the
+   * destination. A different session that has since taken this identity refuses
+   * the restore rather than overwriting history.
+   * @param id - the removed session to restore.
+   * @param options - optional cancellation.
+   * @returns the restored session directory.
+   * @throws {SessionPersistenceNotFoundError} when no recovery copy exists.
+   */
+  override async restore(
+    id: SessionId,
+    options?: SessionPersistenceDeleteOptions,
+  ): Promise<{ restoredPath: string }> {
+    const signal = options?.signal
+    signal?.throwIfAborted()
+    const trashRoot = join(this.root, TRASH_DIR)
+    const suffix = `-${encodeSegment(id)}`
+    let entries: string[]
+    try {
+      entries = await readdir(trashRoot)
+    } catch (error: unknown) {
+      signal?.throwIfAborted()
+      if (isENOENT(error)) throw new SessionPersistenceNotFoundError(id)
+      throw error
+    }
+    const match = entries.filter(entry => entry.endsWith(suffix)).sort().at(-1)
+    if (match === undefined) throw new SessionPersistenceNotFoundError(id)
+    signal?.throwIfAborted()
+    const selected = await this.resolveGenerationInDirectory(join(trashRoot, match), signal)
+    if (selected === undefined) throw new SessionPersistenceNotFoundError(id)
+    // The copy lives in `_trash`, not under its project directory, so the
+    // location half of the identity check cannot hold for it.
+    const header = await this.readGenerationHeader(selected, id, signal, false)
+    if (header === undefined) throw new SessionPersistenceNotFoundError(id)
+    signal?.throwIfAborted()
+    const destination = sessionDir(this.root, header.header.cwd, id)
+    if (await this.exists(destination)) {
+      throw new Error(`cannot restore session "${id}": a session with that identity exists again`)
+    }
+    await mkdir(dirname(destination), { recursive: true, mode: 0o700 })
+    await rename(join(trashRoot, match), destination)
+    return { restoredPath: destination }
+  }
+
+  /**
    * Permanently remove trash entries older than the retention window.
    *
    * Runs at mount beside the layout migration, so a store that is never opened
@@ -1359,11 +1406,19 @@ class JsonlSessionPersistence extends SessionPersistence {
     return artifacts
   }
 
-  /** Read and translate one selected generation header without inspecting its body. */
+  /**
+   * Read and translate one selected generation header without inspecting its body.
+   * @param selected - the generation to read.
+   * @param expectedId - header id the caller asked for, when it has one.
+   * @param signal - optional cancellation.
+   * @param verifyLocation - whether the header must name this file's own project directory;
+   *   a recovery copy parked outside the project layout answers false.
+   */
   private async readGenerationHeader(
     selected: ResolvedJsonlGeneration,
     expectedId?: SessionId,
     signal?: AbortSignal,
+    verifyLocation = true,
   ): Promise<GenerationHeader | undefined> {
     let first: string | undefined
     try {
@@ -1405,13 +1460,17 @@ class JsonlSessionPersistence extends SessionPersistence {
     }
     if (result.status === 'malformed') return undefined
     const header = this.currentHeader(result.header)
-    await this.assertStoredIdentity(
-      selected.sourcePath,
-      selected.sourceVersion,
-      header,
-      expectedId,
-      signal,
-    )
+    if (verifyLocation) {
+      await this.assertStoredIdentity(
+        selected.sourcePath,
+        selected.sourceVersion,
+        header,
+        expectedId,
+        signal,
+      )
+    } else if (expectedId !== undefined && header.id !== expectedId) {
+      throw new Error(`corrupt session log "${selected.sourcePath}": requested id "${expectedId}" does not match header id "${header.id}"`)
+    }
     return {
       header,
       formatStatus: result.status,

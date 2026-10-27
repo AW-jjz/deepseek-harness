@@ -124,3 +124,44 @@ describe('trash sweep', () => {
     } finally { await ctx.fiber.dispose() }
   })
 })
+
+describe('session restore', () => {
+  /** Restore one session through the backend, failing loudly when it has no recovery copy. */
+  async function restore(ctx: Context, id: SessionId) {
+    const result = await ctx.sessionPersistence.restore?.(id)
+    if (result === undefined) throw new Error('the jsonl backend must implement restore')
+    return result
+  }
+
+  it('puts the session back where it was, and it lists again', async () => {
+    const { ctx } = await mount()
+    try {
+      const id = await writeLog(ctx, 'restorable')
+      await remove(ctx, id)
+      const restored = await restore(ctx, id)
+      expect(restored.restoredPath).toContain('restorable')
+      expect((await ctx.sessionPersistence.list()).map(snapshot => snapshot.header.id)).toEqual([id])
+      const handle = await ctx.sessionPersistence.open(id, 'read')
+      try {
+        expect((await handle.read()).events.length).toBeGreaterThan(0)
+      } finally { await handle.close() }
+    } finally { await ctx.fiber.dispose() }
+  })
+
+  it('reports a session with no recovery copy', async () => {
+    const { ctx } = await mount()
+    try {
+      await expect(restore(ctx, 'never-removed' as SessionId)).rejects.toThrow(/not found/u)
+    } finally { await ctx.fiber.dispose() }
+  })
+
+  it('refuses to overwrite an identity that was used again', async () => {
+    const { ctx } = await mount()
+    try {
+      const id = await writeLog(ctx, 'reused')
+      await remove(ctx, id)
+      await writeLog(ctx, 'reused')
+      await expect(restore(ctx, id)).rejects.toThrow(/exists again/u)
+    } finally { await ctx.fiber.dispose() }
+  })
+})
