@@ -39,7 +39,7 @@ Boot runs in two stages: the module stage adopts the parser-loaded bootstrap bat
 
 ### The boot page
 
-The boot page uses plain DOM and local CSS, so bundle and plugin-activation failures remain visible: it shows one spinner node whose CSS arc grows as entries activate, and reports per-entry status. The spinner and its animation phase persist until the full UI replaces the boot page. A plugin that fails import or activation is reported by name with the reason (missing service, import failure, or state) instead of a blank page. The console contains the original import error.
+The boot page uses plain DOM and local CSS, so bundle and plugin-activation failures remain visible: it shows one spinner node whose CSS arc grows as entries activate, and reports per-entry status. The spinner and its animation phase persist until the full UI replaces the boot page. A plugin that fails import or activation is reported by name with the reason (missing service, import failure, or state) instead of a blank page, beside a retry button that reloads the page and a collapsible report whose text can be copied; the console contains the original import error. The page resolves the served language from `navigator.languages` before its first paint, states it on the document (`zh` as `zh-CN`), and draws its own copy in it, so a reader hears the right language while plugins load; the locale plugin replaces both once it activates, including a stored preference. Loading is announced as a polite status that stops being busy when the failure is shown, and the failure heading is the live alert.
 
 <a id="the-shared-module-table"></a>
 ### The shared module table

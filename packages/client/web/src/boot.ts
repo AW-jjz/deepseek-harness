@@ -10,6 +10,7 @@ import type {
   BootManifest, ClientModuleCreateOptions, ClientModuleSystem, DshWindow,
 } from '@deepseek-ai/dsh-client-modules/client'
 import { bootClient } from './boot-client.ts'
+import { applyBootLocale } from './boot-locale.ts'
 import { BootPage } from './boot-page.ts'
 import { mountClient } from './mount.ts'
 import { getStaticModules } from './seed.ts'
@@ -37,7 +38,11 @@ export class AppWebEntry {
   constructor(container: HTMLElement, seams?: BootSeams) {
     this.container = container
     this.seams = seams
-    this.page = new BootPage(container)
+    // Declare and draw the language before the first paint, so a Chinese
+    // reader hears Chinese from the served markup onward rather than after the
+    // locale plugin loads. The plugin overrides both with the stored preference.
+    const locale = applyBootLocale(container.ownerDocument)
+    this.page = new BootPage(container, locale)
   }
 
   /**

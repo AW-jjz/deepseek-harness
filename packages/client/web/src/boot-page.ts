@@ -3,6 +3,7 @@
  * client plugin fails because React arrives only with the UI renderer.
  * @module @deepseek-ai/dsh-client-web/src/boot-page
  */
+import { bootCopy, type BootCopy, type BootLocale } from './boot-locale.ts'
 import type { LoaderEntryState } from './loader-status.ts'
 import css from './boot-page.module.css'
 
@@ -21,6 +22,7 @@ export class BootPage {
   private readonly wordmark: HTMLDivElement
   private readonly spinner: HTMLDivElement
   private readonly hint: HTMLDivElement
+  private readonly copy: BootCopy
   private readonly states = new Map<string, LoaderEntryState>()
   private readonly active = new Set<string>()
   private total = 0
@@ -29,15 +31,23 @@ export class BootPage {
   /**
    * Build and attach the boot page.
    * @param container - Application mount point.
+   * @param locale - language resolved from the shell before plugins loaded.
    */
-  constructor(container: HTMLElement) {
+  constructor(container: HTMLElement, locale: BootLocale = 'en') {
+    this.copy = bootCopy(locale)
     this.root = div(css.boot)
     this.root.dataset.dshBoot = ''
+    // Loading is a polite status: the progress arc changes constantly and is
+    // decorative, so only the state change is announced.
+    this.root.setAttribute('role', 'status')
+    this.root.setAttribute('aria-live', 'polite')
+    this.root.setAttribute('aria-busy', 'true')
     this.card = div(css.card)
     this.wordmark = div(css.wordmark, 'HARNESS')
     this.spinner = div(css.spinner)
     this.spinner.dataset.dshBootSpinner = ''
-    this.hint = div(css.hint, 'Loading plugins…')
+    this.spinner.setAttribute('aria-hidden', 'true')
+    this.hint = div(css.hint, this.copy.loading)
     this.card.append(this.wordmark, this.spinner, this.hint)
     this.root.append(this.card)
     container.append(this.root)
@@ -88,10 +98,28 @@ export class BootPage {
       }
       return
     }
+    this.root.setAttribute('aria-busy', 'false')
     const report = div(css.failed)
-    report.append(div(css.failedTitle, 'Failed to load plugins'))
-    for (const id of failed) report.append(div(css.failedItem, id))
-    if (this.failure !== undefined) report.append(div(css.failedItem, this.failure))
+    // The failure is the one thing worth interrupting for, and it must offer a
+    // way out: reload is the only action the kernel can take without plugins.
+    const title = div(css.failedTitle, this.copy.failedTitle)
+    title.setAttribute('role', 'alert')
+    const retry = document.createElement('button')
+    retry.type = 'button'
+    retry.className = css.retry ?? ''
+    retry.textContent = this.copy.retry
+    retry.addEventListener('click', () => { globalThis.location.reload() })
+    const details = document.createElement('details')
+    details.className = css.diagnostics ?? ''
+    const summary = document.createElement('summary')
+    summary.textContent = this.copy.diagnostics
+    details.append(summary)
+    // The technical record stays selectable, so it can be copied into a report.
+    for (const id of failed) details.append(div(css.failedItem, id))
+    if (this.failure !== undefined) details.append(div(css.failedItem, this.failure))
+    const actions = div(css.actions)
+    actions.append(retry)
+    report.append(title, actions, details)
     this.card.replaceChildren(this.wordmark, report)
   }
 
