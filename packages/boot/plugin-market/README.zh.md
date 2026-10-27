@@ -28,7 +28,7 @@ kind: "package-reference"
 
 | 配置 | 默认值 | 含义 |
 |---|---|---|
-| `indexes` | `[]` | 按显示顺序排列的索引 URL。可用的 URL 采用规范形式，使用 `http:` 或 `https:`，不含凭据或片段。该字段是 volatile 字段：发现区、设置和 `setIndexes` 修改它时，不会重新挂载本服务或 `plugin-manager`。 |
+| `indexes` | `[]` | 按显示顺序排列的索引 URL。可用的 URL 采用规范形式、使用 `https:`、不含凭据或片段。明文 `http:` 只允许回环主机（`127.0.0.1`、`localhost`、`::1`），此时请求不离开本机；其他 `http:` 索引一律以 `insecure` 拒绝，否则路径上的任何人都能改写推荐给用户的内容。该字段是 volatile 字段：发现区、设置和 `setIndexes` 修改它时，不会重新挂载本服务或 `plugin-manager`。 |
 | `fetchTimeoutMs` | `15000` | 单次索引获取（包括响应体）的时限。 |
 | `maxBytes` | `134217728` | 接受的最大索引响应体。 |
 | `cacheTtlMs` | `600000` | 成功读取的索引文档、详细介绍的读取结果以及仓库默认分支提交的缓存时长。 |

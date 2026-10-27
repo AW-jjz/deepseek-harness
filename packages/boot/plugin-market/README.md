@@ -28,7 +28,7 @@ The optional [custom plugin indexes bundle](../../experimental/plugin-market-bun
 
 | Config | Default | Meaning |
 |---|---|---|
-| `indexes` | `[]` | Index URLs in display order. A usable URL is in canonical form and uses `http:` or `https:`, without credentials or fragment. The field is volatile: Discover, Settings, and `setIndexes` change it without remounting this service or `plugin-manager`. |
+| `indexes` | `[]` | Index URLs in display order. A usable URL is in canonical form, uses `https:`, and carries no credentials or fragment. Plain `http:` is accepted only for a loopback host (`127.0.0.1`, `localhost`, `::1`), where the request never leaves the machine; any other `http:` index is refused as `insecure` because whoever is on the path could otherwise rewrite what the user is offered. The field is volatile: Discover, Settings, and `setIndexes` change it without remounting this service or `plugin-manager`. |
 | `fetchTimeoutMs` | `15000` | Deadline for one index fetch, including its body. |
 | `maxBytes` | `134217728` | Largest accepted index body. |
 | `cacheTtlMs` | `600000` | Lifetime of a successfully read index document, a detail read result, and a repository's default-branch commit. |

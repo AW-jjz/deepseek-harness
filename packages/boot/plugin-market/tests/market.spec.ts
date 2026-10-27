@@ -276,9 +276,9 @@ it('ignores failures finishing after removal', async () => {
 it('saves normalized http and https index sources through Settings', async () => {
   const update = vi.fn(() => Promise.resolve())
   const { market } = await mount({}, { settings: update })
-  await market.setIndexes([' https://Market.example/index.json', 'http://market.example:8080/i.json'])
+  await market.setIndexes([' https://Market.example/index.json', 'http://127.0.0.1:8080/i.json'])
   expect(update).toHaveBeenCalledWith('plugin-market', {
-    indexes: ['https://market.example/index.json', 'http://market.example:8080/i.json'],
+    indexes: ['https://market.example/index.json', 'http://127.0.0.1:8080/i.json'],
   })
 })
 
@@ -302,12 +302,22 @@ it('counts a new spelling of a kept source as a repeat, and keeps an unparseable
 it.each([
   ['not a url', 'not-absolute'],
   ['file:///srv/index.json', 'scheme'],
+  ['http://market.example/index.json', 'insecure'],
+  ['http://192.168.1.10/index.json', 'insecure'],
   ['https://user:pw@market.example/index.json', 'credentials-or-fragment'],
   ['https://market.example/index.json#top', 'credentials-or-fragment'],
   ['https://market.example/index.json#', 'credentials-or-fragment'],
 ])('refuses the index URL %s', async (url, reason) => {
   const { market } = await mount({}, { settings: () => Promise.resolve() })
   expect(await failure(market.setIndexes([url]))).toMatchObject({ code: 'plugin-market/invalid-index-url', details: { url, reason } })
+})
+
+it('allows plain http only for an index served from this machine', async () => {
+  const update = vi.fn(() => Promise.resolve())
+  const { market } = await mount({}, { settings: update })
+  const loopback = ['http://127.0.0.1:8080/index.json', 'http://localhost/index.json', 'http://[::1]:9000/index.json']
+  await market.setIndexes(loopback)
+  expect(update).toHaveBeenCalledWith('plugin-market', { indexes: loopback })
 })
 
 it('refuses a repeated index URL', async () => {
