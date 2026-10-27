@@ -58,7 +58,7 @@ kind: "package-reference"
 
 ```text
 <root>/
-  --<normalized-cwd>--/          # readable project directory (or _no-cwd/)
+  --<sha256-prefix>--/           # project directory: digest of the cwd (or _no-cwd/)
     <encoded-id>/                # session-owned directory
       session.jsonl.zstd         # released v0, compressed root
       session.v1.jsonl.zstd      # released v1, compressed root
@@ -70,7 +70,7 @@ kind: "package-reference"
       session.v3.jsonl           # released v3/current, raw root; later versions use vN
 ```
 
-会话 id 在使用前被单射转义为一个安全路径段（无遍历、无冲突）。规范化 cwd 让项目目录保持可读、便于导航；规范化相同的 cwd 字符串共享项目目录，而会话 id 仍选择不同会话目录。运行时操作选择数值最高的规范 generation，格式拒绝诊断会点名该绝对路径，让操作者能找到构建拒绝解读的原始日志。
+会话 id 在使用前被单射转义为一个安全路径段（无遍历、无冲突）。项目目录由 `--`、`sha256(cwd)` 的前 16 个十六进制字符与 `--` 组成，存储因此不再复述会话工作过的用户名与仓库名；原始路径保存在每个会话 header 中，列举与诊断都从那里读取。在此布局之前写入的存储保留其可读的 `--<规范化-cwd>--` 目录：读取接受两种名称，挂载时若目录内所有会话指向同一个 cwd，就把可读目录改名为其摘要。若一个目录里放着被可读编码合并到一起的两个路径的会话，则保持原样——不选出胜者就无法用一个摘要替换它的名字——并继续可读。运行时操作选择数值最高的规范 generation，格式拒绝诊断会点名该绝对路径，让操作者能找到构建拒绝解读的原始日志。
 
 ### 持久性与崩溃语义
 

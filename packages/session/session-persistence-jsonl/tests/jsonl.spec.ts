@@ -10,9 +10,9 @@ import type { SessionEvent, SessionHeader } from '@deepseek-ai/dsh-session'
 import type { SessionPersistence } from '@deepseek-ai/dsh-session-persistence'
 import * as JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
 import {
-  assertNoRetiredHeaderFields, encodeSegment, eventLines, generationLogFilename, generationLogPath,
-  logPath, parseGenerationLogFilename, projectDir, projectKey, scanLog, sessionDir, SessionLogScanner,
-  toHeaderLine,
+  assertNoRetiredHeaderFields, encodeSegment, eventLines, generationLogFilename, generationLogPath, isProjectKey,
+  legacyProjectKey, logPath, parseGenerationLogFilename, projectDir, projectKey, scanLog, sessionDir,
+  SessionLogScanner, toHeaderLine,
 } from '../src/format.ts'
 import {
   runPersistenceContract, meta, oneTurnLog, releasedV1OneTurnLog,
@@ -509,14 +509,27 @@ describe('JsonlSessionPersistence: format helpers', () => {
       .toThrow('unseeded session header inherited event count must be 0')
   })
 
-  it('projectKey normalizes project paths into bounded readable names', () => {
-    expect(projectKey('/Users/qyj/work/deepseek-harness')).toBe('--Users-qyj-work-deepseek-harness--')
-    expect(projectKey('/a/b-c')).toBe(projectKey('/a-b/c'))
-    expect(projectKey('C:\\work\\agent')).toBe('--C-work-agent--')
-    expect(projectKey('/开发/~agent')).toBe('--~5F00~53D1-~007Eagent--')
-    expect(projectKey('/')).toBe('--root--')
-    expect(projectKey('/' + 'x'.repeat(1_000))).toHaveLength(255)
+  it('projectKey names a project by digest, not by the path it would spell out', () => {
+    const key = projectKey('/Users/qyj/work/deepseek-harness')
+    expect(key).toMatch(/^--[0-9a-f]{16}--$/u)
+    expect(key).toBe(projectKey('/Users/qyj/work/deepseek-harness'))
+    expect(key).not.toBe(projectKey('/Users/qyj/work/other-repository'))
+    expect(isProjectKey(key)).toBe(true)
+    // Fixed width: no filesystem component limit applies however long the path is.
+    expect(projectKey('/' + 'x'.repeat(1_000))).toHaveLength(20)
     expect(() => projectKey('')).toThrow(/empty project path/)
+    expect(isProjectKey('_no-cwd')).toBe(false)
+    expect(isProjectKey(legacyProjectKey('/a/b'))).toBe(false)
+  })
+
+  it('legacyProjectKey keeps the readable layout only so an existing store stays readable', () => {
+    expect(legacyProjectKey('/Users/qyj/work/deepseek-harness')).toBe('--Users-qyj-work-deepseek-harness--')
+    expect(legacyProjectKey('/a/b-c')).toBe(legacyProjectKey('/a-b/c'))
+    expect(legacyProjectKey('C:\\work\\agent')).toBe('--C-work-agent--')
+    expect(legacyProjectKey('/开发/~agent')).toBe('--~5F00~53D1-~007Eagent--')
+    expect(legacyProjectKey('/')).toBe('--root--')
+    expect(legacyProjectKey('/' + 'x'.repeat(1_000))).toHaveLength(255)
+    expect(() => legacyProjectKey('')).toThrow(/empty project path/)
   })
 
   it('resolves a relative custom root before storing a session', async () => {
@@ -2613,17 +2626,18 @@ describe('JsonlSessionPersistence: edge cases', () => {
     expect(ids).toEqual(['p1', 'p2', 'p3'])
   })
 
-  it('groups sessions whose cwd paths normalize to the same project directory', async () => {
+  it('gives two paths that the readable layout merged their own project directory', async () => {
     const first = meta('normalized-first', '/a/b-c')
     const second = meta('normalized-second', '/a-b/c')
     await writeLog(ctx.sessionPersistence, first, oneTurnLog())
     await writeLog(ctx.sessionPersistence, second, oneTurnLog())
 
-    expect(projectDir(root, first.cwd)).toBe(projectDir(root, second.cwd))
-    expect(await readdir(projectDir(root, first.cwd))).toEqual(expect.arrayContaining([
-      encodeSegment(first.id),
-      encodeSegment(second.id),
-    ]))
+    // The readable key collided on these paths; the hashed key separates them,
+    // so neither session's log can be mistaken for the other's project.
+    expect(legacyProjectKey(first.cwd as string)).toBe(legacyProjectKey(second.cwd as string))
+    expect(projectDir(root, first.cwd)).not.toBe(projectDir(root, second.cwd))
+    expect(await readdir(projectDir(root, first.cwd))).toEqual([encodeSegment(first.id)])
+    expect(await readdir(projectDir(root, second.cwd))).toEqual([encodeSegment(second.id)])
     expect((await ctx.sessionPersistence.list()).map(s => s.header.id).sort())
       .toEqual([first.id, second.id].sort())
   })

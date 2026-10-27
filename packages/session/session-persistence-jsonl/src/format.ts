@@ -8,6 +8,7 @@
  * @module dsh-session-persistence-jsonl/format
  */
 
+import { createHash } from 'node:crypto'
 import { isAbsolute, join } from 'node:path'
 import {
   SESSION_FORMAT_VERSION,
@@ -214,15 +215,20 @@ export function encodeSegment(raw: string): string {
 }
 
 /**
- * Build the readable directory key for a project path.
- * Filesystem separators and drive separators become `-`; unsafe code units use
- * the same `~XXXX` escape as session ids. The key is bounded for filesystem
- * component limits. Separator replacement and truncation are intentionally
- * lossy, following the common human-navigable project-directory convention.
+ * Build the readable directory key a store written before hashing used for a
+ * project path.
+ *
+ * Filesystem separators and drive separators became `-`; unsafe code units use
+ * the same `~XXXX` escape as session ids, and the key is bounded for filesystem
+ * component limits. The encoding is lossy in two ways that matter to a reader:
+ * distinct paths can collide (`/a/b-c` and `/a-b/c`), and the name states the
+ * user name and repository the session worked in. Current layout uses
+ * {@link projectKey} instead; this key survives only so a store holding such
+ * directories stays readable until {@link projectKey} migration replaces them.
  * @param cwd - the session's project directory.
- * @returns a single filesystem-safe project directory name.
+ * @returns the single filesystem-safe project directory name this layout used.
  */
-export function projectKey(cwd: string): string {
+export function legacyProjectKey(cwd: string): string {
   if (cwd.length === 0) throw new Error('cannot encode an empty project path')
   let readable = ''
   let separatorRun = false
@@ -244,6 +250,45 @@ export function projectKey(cwd: string): string {
   return `--${slug.slice(0, 251)}--`
 }
 
+/** Digest length of the hashed project key: enough to separate projects, short enough to read in a path. */
+const PROJECT_KEY_HEX_LENGTH = 16
+
+/**
+ * Build the directory key for a project path: a digest, not a description.
+ *
+ * A store lives in a user's home and is readable by anything that can list it,
+ * so the project directory must not restate the user name and repository the
+ * session worked in. The key is `--<16 hex of sha256(cwd)>--`: stable for one
+ * path, distinct across projects in practice, and fixed-width so no filesystem
+ * component limit applies. The path itself is recorded in each session header,
+ * which is what listing, migration, and the Client read it from.
+ * @param cwd - the session's project directory; must be non-empty (throws on `''`).
+ * @returns a single filesystem-safe project directory name.
+ */
+export function projectKey(cwd: string): string {
+  if (cwd.length === 0) throw new Error('cannot encode an empty project path')
+  const digest = createHash('sha256').update(cwd).digest('hex').slice(0, PROJECT_KEY_HEX_LENGTH)
+  return `--${digest}--`
+}
+
+/**
+ * Every directory name a store may hold for one project path, current layout first.
+ * @param cwd - the session's project directory.
+ * @returns the hashed key and, after it, the readable key it replaced.
+ */
+export function projectKeyCandidates(cwd: string): string[] {
+  return [projectKey(cwd), legacyProjectKey(cwd)]
+}
+
+/**
+ * Whether a directory name is a current-layout project key.
+ * @param name - one directory name under the session root.
+ * @returns true for the fixed-width digest form.
+ */
+export function isProjectKey(name: string): boolean {
+  return new RegExp(`^--[0-9a-f]{${PROJECT_KEY_HEX_LENGTH}}--$`).test(name)
+}
+
 /**
  * The configured root's human-navigable project directory. A configured root
  * may be local or shared; this grouping does not prescribe its deployment.
@@ -254,6 +299,19 @@ export function projectKey(cwd: string): string {
 export function projectDir(root: string, cwd: string | undefined): string {
   if (cwd === undefined) return join(root, '_no-cwd')
   return join(root, projectKey(cwd))
+}
+
+/**
+ * Every directory a project path may occupy, current layout first: the hashed
+ * key, then the readable key a store written before hashing still uses. Reads
+ * accept any of them so a store stays usable until migration moves it.
+ * @param root - the backend's session root directory.
+ * @param cwd - the session's project directory; `undefined` selects `_no-cwd`.
+ * @returns project directory paths under `root`.
+ */
+export function projectDirCandidates(root: string, cwd: string | undefined): string[] {
+  if (cwd === undefined) return [join(root, '_no-cwd')]
+  return projectKeyCandidates(cwd).map(key => join(root, key))
 }
 
 /**

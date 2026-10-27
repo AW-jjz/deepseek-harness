@@ -14,8 +14,8 @@ import {
   sessionFormatCatalog,
 } from '@deepseek-ai/dsh-session-format-catalog'
 import { readdirSync, type Dirent } from 'node:fs'
-import { open, mkdir, readdir, realpath, link, rm, stat, statfs, truncate } from 'node:fs/promises'
-import { dirname, join, resolve } from 'node:path'
+import { open, mkdir, readdir, realpath, link, rename, rm, stat, statfs, truncate } from 'node:fs/promises'
+import { basename, dirname, join, resolve } from 'node:path'
 import { performance } from 'node:perf_hooks'
 import { scheduler } from 'node:timers/promises'
 import { createHash, randomBytes } from 'node:crypto'
@@ -37,8 +37,8 @@ import { SessionWriteLease } from './lease.ts'
 import { SESSION_FORMAT_VERSION, SessionId as makeSessionId, SessionLogOffset } from '@deepseek-ai/dsh-session'
 import type { SessionEvent, SessionId, SessionHeader, SessionLogOffset as SessionLogOffsetType } from '@deepseek-ai/dsh-session'
 import {
-  assertNoRetiredHeaderFields, encodeSegment, eventLines, generationLogFilename, generationLogPath, logPath, logSuffix,
-  parseGenerationLogFilename, projectDir, scanLog, sessionDir, SessionLogScanner, toHeaderLine,
+  assertNoRetiredHeaderFields, encodeSegment, eventLines, generationLogFilename, isProjectKey, logPath, logSuffix,
+  parseGenerationLogFilename, projectDir, projectDirCandidates, scanLog, sessionDir, SessionLogScanner, toHeaderLine,
   type JsonlCompression,
 } from './format.ts'
 import {
@@ -366,6 +366,96 @@ class JsonlSessionPersistence extends SessionPersistence {
     } catch {
       return undefined
     }
+  }
+
+  /**
+   * Move project directories written by the readable-key layout to the hashed
+   * key, so an existing store stops spelling out the user name and repository
+   * in its directory names.
+   *
+   * Runs once at mount, before consumers read; reads accept either layout, so a
+   * directory this cannot move stays usable. A directory moves only when every
+   * session inside it names the same cwd: the readable key was lossy, so one
+   * directory can hold sessions from two paths, and splitting it here would be
+   * a guess. Moving is a rename when the hashed directory does not exist yet and
+   * a per-session move when it does; nothing is removed except the source
+   * directory once it is empty. A second process on the same root can race the
+   * rename, in which case that directory is left for the next mount.
+   * @param signal - optional cancellation.
+   * @returns after every directory it could move has been moved.
+   */
+  async migrateLegacyProjectKeys(signal?: AbortSignal): Promise<void> {
+    let artifacts: ReadonlyArray<GenerationHeader & { path: string; sourceVersion: number }>
+    try {
+      artifacts = await this.listArtifacts(signal)
+    } catch (error) {
+      signal?.throwIfAborted()
+      // A store the reader already refuses keeps its layout; refusing here would
+      // turn a first-read error into a mount error.
+      this.ctx.logger.warn(`${this.name}: project directory migration skipped: ${String(error)}`)
+      return
+    } finally {
+      // The mount-time scan is not a consumer read: it must not stand in for the
+      // encoding check the first reader runs on the store it actually opens.
+      this.rootEncodingCheck = undefined
+    }
+    const projects = new Map<string, Set<string>>()
+    for (const artifact of artifacts) {
+      const project = dirname(dirname(artifact.path))
+      const name = basename(project)
+      if (name === '_no-cwd' || isProjectKey(name)) continue
+      const cwds = projects.get(project) ?? new Set<string>()
+      if (artifact.header.cwd !== undefined) cwds.add(artifact.header.cwd)
+      projects.set(project, cwds)
+    }
+    for (const [project, cwds] of projects) {
+      signal?.throwIfAborted()
+      if (cwds.size !== 1) {
+        this.ctx.logger.warn(`${this.name}: left project directory "${basename(project)}" in place: it holds sessions from ${cwds.size} project paths`)
+        continue
+      }
+      const cwd = cwds.values().next().value as string
+      const target = projectDir(this.root, cwd)
+      if (target === project) continue
+      await this.moveProjectDirectory(project, target, signal)
+    }
+  }
+
+  /**
+   * Move one project directory, merging into an existing target instead of
+   * failing: the hashed directory can already hold sessions written after this
+   * layout started, and one mount must not refuse the whole migration for that.
+   * @param from - readable-key directory.
+   * @param to - hashed-key directory.
+   * @param signal - optional cancellation.
+   * @returns after the move or the merge.
+   */
+  private async moveProjectDirectory(from: string, to: string, signal?: AbortSignal): Promise<void> {
+    try {
+      await rename(from, to)
+      return
+    } catch (error) {
+      signal?.throwIfAborted()
+      if (isENOENT(error)) return
+      // Any other failure falls through to the per-session merge, which reports
+      // its own problems against the specific child it could not move.
+    }
+    signal?.throwIfAborted()
+    const entries = await readdir(from, { withFileTypes: true })
+    for (const entry of entries) {
+      signal?.throwIfAborted()
+      if (!entry.isDirectory()) continue
+      const destination = join(to, entry.name)
+      const occupied = await this.exists(destination)
+      signal?.throwIfAborted()
+      if (occupied) {
+        this.ctx.logger.warn(`${this.name}: session directory "${entry.name}" exists in both project directories; kept the existing one`)
+        continue
+      }
+      await rename(join(from, entry.name), destination)
+    }
+    signal?.throwIfAborted()
+    if ((await readdir(from)).length === 0) await rm(from, { recursive: true, force: true })
   }
 
   /**
@@ -1631,20 +1721,18 @@ class JsonlSessionPersistence extends SessionPersistence {
     if (expectedId !== undefined && meta.id !== expectedId) {
       throw new Error(`corrupt session log "${path}": requested id "${expectedId}" does not match header id "${meta.id}"`)
     }
-    let expectedPath: string
+    /* A store written before hashing keeps its project directories under the
+       readable key until migration moves them, so both layouts name this log. */
+    let expectedPaths: string[]
     try {
-      expectedPath = generationLogPath(
-        this.root,
-        meta.cwd,
-        meta.id,
-        storedVersion,
-        this.compression,
-      )
+      expectedPaths = projectDirCandidates(this.root, meta.cwd).map(project => join(
+        project, encodeSegment(meta.id), generationLogFilename(storedVersion, this.compression),
+      ))
     } catch (error) {
       throw new Error(`corrupt session log "${path}": header id cannot name a storage path`, { cause: error })
     }
-    if (path !== expectedPath && !await this.sameFile(path, expectedPath, signal)) {
-      throw new Error(`corrupt session log "${path}": header id "${meta.id}" and cwd identify "${expectedPath}"`)
+    if (!expectedPaths.includes(path) && !await this.matchesAnyPath(path, expectedPaths, signal)) {
+      throw new Error(`corrupt session log "${path}": header id "${meta.id}" and cwd identify "${expectedPaths[0]}"`)
     }
     signal?.throwIfAborted()
   }
@@ -1672,6 +1760,22 @@ class JsonlSessionPersistence extends SessionPersistence {
    * case aliases on case-insensitive filesystems without weakening identity
    * checks on case-sensitive stores.
    */
+  /**
+   * Whether one path resolves to any of the paths a header names, admitting a
+   * store that still holds a pre-hash project directory.
+   * @param path - the physical log path that was read.
+   * @param expectedPaths - every path the header's identity names, current layout first.
+   * @param signal - optional cancellation.
+   * @returns true when one expected path is the same physical file.
+   */
+  private async matchesAnyPath(path: string, expectedPaths: readonly string[], signal?: AbortSignal): Promise<boolean> {
+    for (const expectedPath of expectedPaths) {
+      signal?.throwIfAborted()
+      if (await this.sameFile(path, expectedPath, signal)) return true
+    }
+    return false
+  }
+
   private async sameFile(path: string, expectedPath: string, signal?: AbortSignal): Promise<boolean> {
     signal?.throwIfAborted()
     try {
@@ -1843,6 +1947,7 @@ export const Config: z<Config> = z.object({
  */
 export async function apply(ctx: Context, config: Config): Promise<void> {
   let service!: Fiber
+  let backend: JsonlSessionPersistence | undefined
   // Keep this generator synchronous so thenable disposers are registered as functions, not awaited.
   ctx.effect(function* () {
     const tracker = new JsonlBackendTracker(name)
@@ -1850,10 +1955,13 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     service = ctx.plugin({
       name: 'session-persistence-jsonl-service',
       apply(serviceCtx: Context) {
-        new JsonlSessionPersistence(serviceCtx, config, tracker)
+        backend = new JsonlSessionPersistence(serviceCtx, config, tracker)
       },
     })
     yield service.dispose
   }, 'session-persistence-jsonl resources')
   await service.await()
+  // Layout migration finishes before this plugin's own load resolves, so no
+  // consumer reads a store that is halfway between the two directory layouts.
+  await backend?.migrateLegacyProjectKeys()
 }

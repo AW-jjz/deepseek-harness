@@ -54,11 +54,11 @@ The generated [configuration catalog](../../../docs/config-catalog.md#deepseek-a
 
 ### On-disk layout
 
-Each session gets a session-owned directory under a readable project directory. Every canonical generation starts with a physical header whose version equals its filename. The current format stores one physical row per durable event; the frozen v0 and v1 readers also understand their historical packed Assistant-delta rows. The current format stores `isSeeded` in the header and derives the inherited cut from the last tagged `session/end-seed` marker, while historical codecs translate their numeric `seedLength`. The format catalog completes that translation before a handle exposes current logical values. Current storage records use the lossless source-event representation described below:
+Each session gets a session-owned directory under a project directory named by the digest of that project path. Every canonical generation starts with a physical header whose version equals its filename. The current format stores one physical row per durable event; the frozen v0 and v1 readers also understand their historical packed Assistant-delta rows. The current format stores `isSeeded` in the header and derives the inherited cut from the last tagged `session/end-seed` marker, while historical codecs translate their numeric `seedLength`. The format catalog completes that translation before a handle exposes current logical values. Current storage records use the lossless source-event representation described below:
 
 ```text
 <root>/
-  --<normalized-cwd>--/          # readable project directory (or _no-cwd/)
+  --<sha256-prefix>--/           # project directory: digest of the cwd (or _no-cwd/)
     <encoded-id>/                # session-owned directory
       session.jsonl.zstd         # released v0, compressed root
       session.v1.jsonl.zstd      # released v1, compressed root
@@ -70,7 +70,7 @@ Each session gets a session-owned directory under a readable project directory. 
       session.v3.jsonl           # released v3/current, raw root; later versions use vN
 ```
 
-Session ids are injectively escaped to one safe path segment before use (no traversal, no collision). The normalized cwd keeps the project directory readable for navigation; cwd strings that normalize alike share a project directory while session ids still select distinct session directories. Runtime operations select the numerically highest canonical generation, and format-refusal diagnostics name that absolute path so an operator can find the raw log a build refused to interpret.
+Session ids are injectively escaped to one safe path segment before use (no traversal, no collision). The project directory is `--` plus the first 16 hex characters of `sha256(cwd)` plus `--`, so the store never restates the user name or repository a session worked in; the raw path lives in each session header, which is what listing and diagnostics read it from. A store written before this layout keeps its readable `--<normalized-cwd>--` directories: reads accept either name, and mount renames a readable directory to its digest when every session inside it names the same cwd. A directory holding sessions from two paths that the readable encoding merged is left in place — its name cannot be replaced by one digest without choosing a winner — and stays readable. Runtime operations select the numerically highest canonical generation, and format-refusal diagnostics name that absolute path so an operator can find the raw log a build refused to interpret.
 
 ### Durability and crash semantics
 
