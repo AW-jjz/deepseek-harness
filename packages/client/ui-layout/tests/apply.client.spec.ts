@@ -10,7 +10,7 @@ import type { SlotRendererHost } from '@deepseek-ai/dsh-client-ui-slots'
 import { LocaleRuntime } from '@deepseek-ai/dsh-client-locale/client'
 import { apply as themeApply, inject as themeInject, ThemeRuntime } from '@deepseek-ai/dsh-client-ui-theme/client'
 import { apply, inject, LayoutController } from '@deepseek-ai/dsh-client-ui-layout/client'
-import { apply as nodeApply } from '@deepseek-ai/dsh-client-ui-layout'
+import { apply as nodeApply, Config as nodeConfig } from '@deepseek-ai/dsh-client-ui-layout'
 import type { MainPanelId } from '../src/client/service.ts'
 import type { createLayoutStore } from '../src/client/stores.ts'
 
@@ -171,8 +171,13 @@ describe('ui-layout client apply', () => {
 })
 
 describe('node half', () => {
-  it('node apply is an intentional no-op (loader-managed lifecycle only)', () => {
-    nodeApply()
-    expect(true).toBe(true) // reaching here without throw is the contract
+  it('node half declares the persisted layout schema and touches no DOM', () => {
+    const ctx = new Context()
+    try {
+      nodeApply(ctx)
+      // The schema is what publishes the `ui-layout` settings namespace; without
+      // it the browser has nowhere to store a width.
+      expect(Object.keys(nodeConfig)).toEqual(['sidebarWidth', 'rightPanelWidth', 'activePanelId'])
+    } finally { void ctx.fiber.dispose() }
   })
 })

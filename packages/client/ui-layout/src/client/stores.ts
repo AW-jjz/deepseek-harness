@@ -13,7 +13,7 @@ import {
  * Transient layout preferences. Responsive concessions never rewrite widths;
  * the right panel's expanded state belongs to its occupant.
  */
-type LayoutState = {
+export type LayoutState = {
   panelInfo: {
     /** Null selects the Conversation; global panels keep the current Session intact. */
     activePanelId: MainPanelId | null
@@ -55,7 +55,7 @@ type LayoutInfo = {
  * Annotation twin of the actions literal below (the export needs a declared
  * return type); drift fails assignability at the defineStore call.
  */
-type LayoutActions = {
+export type LayoutActions = {
   selectPanel: (draft: LayoutState, panelId: MainPanelId | null) => void
   retainMainPanels: (draft: LayoutState, panelIds: readonly string[]) => void
   setSidebar: (draft: LayoutState, px: number) => void

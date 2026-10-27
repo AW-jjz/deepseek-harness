@@ -9,7 +9,7 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-This package provides the Web GUI's three-column AppFrame, edge-column widths, and `ctx.layout` presentation control. The right column concedes space before the center; its occupant renders fullscreen while the frame retains the wide-screen track underneath. The theme presenter owns color scheme, alias tokens, font sizes, font lists, and document metadata. Layout state resets on reload.
+This package provides the Web GUI's three-column AppFrame, edge-column widths, and `ctx.layout` presentation control. The right column concedes space before the center; its occupant renders fullscreen while the frame retains the wide-screen track underneath. The theme presenter owns color scheme, alias tokens, font sizes, font lists, and document metadata. The frame keeps the two widths a user dragged to and the main panel selected last in the Host's `ui-layout` settings section, so a reload reopens the same layout; responsive collapse and presentation reports stay derived and are never saved.
 
 ## Table of Contents
 
@@ -27,7 +27,7 @@ This package provides the Web GUI's three-column AppFrame, edge-column widths, a
 
 Desktop Mod+B toggles the left sidebar through the same layout action used by its controls. The shortcut command is unavailable behind modal dialogs and yields to terminal input.
 
-The root slot composes the sidebar, main content, and right column. The sidebar spans 264–420px, defaults to 280px, and retains a 56px rail when collapsed; below 1024px it collapses automatically, and opening the right panel collapses a manually expanded sidebar. The right panel first opens at 45% of the viewport, then retains the user's pixel preference, capped at 70%. To protect 400px for the center, the frame first reduces the right panel to 300px, then reports insufficient room so its occupant closes it, and only then compresses the center further. Dragging has no transition delay; the right handle is absent while closed or fullscreen.
+The frame remembers the two widths the user dragged to and the main panel selected last in the Host's `ui-layout` settings section: the browser half hydrates them once, so a reload reopens with the same layout, and writes a settled change back through `ctx.configForms`. A deployment without that transport keeps the frame in memory only. Values saved on a wider monitor are clamped again on read, so they never force an impossible width on a smaller window. The root slot composes the sidebar, main content, and right column. The sidebar spans 264–420px, defaults to 280px, and retains a 56px rail when collapsed; below 1024px it collapses automatically, and opening the right panel collapses a manually expanded sidebar. The right panel first opens at 45% of the viewport, then retains the user's pixel preference, capped at 70%. To protect 400px for the center, the frame first reduces the right panel to 300px, then reports insufficient room so its occupant closes it, and only then compresses the center further. Dragging has no transition delay; the right handle is absent while closed or fullscreen.
 
 Global panels occupy the root-scoped `main` keyed slot; `conversation` is the reserved key for the Conversation. `ctx.layout.selectPanel(id)` selects a registered panel, and `null` selects the Conversation without changing the current Session. The Plugins page contributes one of the shipped global panels.
 
@@ -91,7 +91,7 @@ None; this package neither assembles nor sends a provider request.
 
 These limits define the current layout behavior. They are current package constraints, not a general window-manager comparison or a task backlog.
 
-- **Panel geometry is transient** — reload restores the sidebar default and the right panel hidden; each dragged width is one frame-wide preference, not a per-Session fact.
+- **Widths and the selected panel persist per profile, not per Session** — the sidebar width, the right panel width once it has been opened, and the last main panel come back after a reload; responsive collapse, fullscreen presentation, and whether a right panel occupant is expanded stay derived and are not saved.
 - **Extremely narrow windows** — after the right panel closes, the center may still fall below 400px; the left 56px rail remains.
 - **Track and panel travel on one shared curve only while animating** — during a discrete open/close the frame sets `data-animating` and its track transition and the occupant's slide read the same duration and easing variables; an occupant that used its own would detach the panel's edge from the conversation's while squeezing. Drags and instant presentation switches run transition-free, so the curve does not cover them.
 - **No scroll anchoring during squeeze reflow** — layout changes may move the reader's viewport.

@@ -20,6 +20,7 @@ import { LayoutController } from './service.ts'
 import type { ShortcutCommandId } from '@deepseek-ai/dsh-client-shortcuts/client'
 import { en, ja, es, fr, de, ru, pt, zh } from './shortcut-locales.ts'
 import { ThemePresenter } from './theme-presenter.ts'
+import { persistFramePreferences } from './persist.ts'
 
 // Contract exports only (export-convergence rule: cross-package consumers
 // keep a symbol exported; test-only/package-internal symbols live off /src).
@@ -167,6 +168,7 @@ export function apply(ctx: ClientContext): void {
       instance.actions.retainMainPanels(ctx.slots.entries('main').flatMap(entry =>
         entry.options.key === undefined ? [] : [entry.options.key]))
     }
+    const disposePreferences = persistFramePreferences(ctx, instance)
     const panelInfo: HostObservable<PanelInfo> = {
       getSnapshot: () => instance.getSnapshot().panelInfo,
       subscribe: listener => instance.subscribe(listener),
@@ -203,6 +205,7 @@ export function apply(ctx: ClientContext): void {
     const disposePanels = ctx.slots.subscribe('main', retainMainPanels)
     retainMainPanels()
     return () => {
+      disposePreferences()
       disposeShortcut()
       layout.dispose()
       disposePanels()
