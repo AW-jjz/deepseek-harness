@@ -33,6 +33,10 @@ import { evaluatePluginCompatibility, pluginCompatibilityWarning } from './plugi
 import { readProfileVersionExemptions } from './profile-compatibility.ts'
 import { loadOverlayPatches } from './index.ts'
 import { realModuleDirectory } from './profile-resolution/legacy-links.ts'
+import {
+  installationCachePath, installationFingerprint, readInstallationScope, writeInstallationScope,
+  type CachedInstallationScope,
+} from './profile-resolution/installation-cache.ts'
 
 /** Directory under the Harness home holding every profile. */
 export const PROFILES_DIR = 'profiles'
@@ -315,7 +319,7 @@ function profileDependencyNames(manifest: ProfileManifest): string[] {
 
 /** Resolve the installation packages that the runtime resolver supplies to every profile. */
 function collectInstallationScopePackages(
-  installAnchor: string, skippedBundles: ReadonlySet<string>,
+  installAnchor: string, skippedBundles: ReadonlySet<string>, cachePath?: string,
 ): {
   packageNames: ReadonlySet<string>
   packageDirs: ReadonlyMap<string, string>
@@ -324,6 +328,22 @@ function collectInstallationScopePackages(
 } {
   // Real declaring paths keep workspace symlinks under node_modules from disabling tsx path mappings.
   const canonicalAnchor = join(realModuleDirectory(dirname(installAnchor)), basename(installAnchor))
+  // The walk reads one manifest per package; the graph changes only when this
+  // installation is replaced, so a fingerprint hit skips it entirely.
+  const fingerprint = cachePath === undefined ? undefined : installationFingerprint(canonicalAnchor, skippedBundles)
+  const cached = fingerprint === undefined || cachePath === undefined
+    ? undefined
+    : readInstallationScope(cachePath, fingerprint)
+  if (cached !== undefined) {
+    const restoredVersions = new Map<string, string | undefined>()
+    for (const [name, version] of cached.versions) restoredVersions.set(name, version ?? undefined)
+    return {
+      packageNames: new Set(cached.packageNames),
+      packageDirs: new Map(cached.packageDirs),
+      declarers: new Map(cached.declarers),
+      versions: restoredVersions,
+    }
+  }
   const appManifest = readPackageManifest(canonicalAnchor)
   const links = new Map<string, string>()
   const declarers = new Map<string, string>()
@@ -364,6 +384,15 @@ function collectInstallationScopePackages(
       queue.push({ anchor: manifestPath, manifest })
     }
   }
+  if (cachePath !== undefined && fingerprint !== undefined) {
+    const scope: CachedInstallationScope = {
+      packageNames: [...links.keys()],
+      packageDirs: [...links],
+      declarers: [...declarers],
+      versions: [...versions].map(([name, version]) => [name, version ?? null] as const),
+    }
+    writeInstallationScope(cachePath, fingerprint, scope)
+  }
   return { packageNames: new Set(links.keys()), packageDirs: links, declarers, versions }
 }
 
@@ -375,6 +404,8 @@ export interface RuntimeResolutionOptions {
   profile?: Profile
   /** Harness home; defaults to {@link resolveDshHome}. */
   home?: string
+  /** Read the installation graph from disk even when the cache is current. Defaults to reusing it. */
+  rereadInstallation?: boolean
 }
 
 /**
@@ -385,11 +416,12 @@ export interface RuntimeResolutionOptions {
 export async function createRuntimeResolution(
   options: RuntimeResolutionOptions,
 ): Promise<ProfileRuntimeResolution> {
-  const { installAnchor, profile, home = resolveDshHome() } = options
+  const { installAnchor, profile, home = resolveDshHome(), rereadInstallation = false } = options
   const profilesDir = join(home, PROFILES_DIR)
   const manifest = readOptionalProfileManifest(profile)
   const { packageNames, packageDirs, declarers, versions } = collectInstallationScopePackages(
     installAnchor, new Set(profile?.skippedBundles.map(skipped => skipped.packageName)),
+    rereadInstallation ? undefined : installationCachePath(home),
   )
   const profileDeclarers = new Map<string, string>()
   const profileVersions = new Map<string, string | undefined>()
@@ -459,7 +491,7 @@ export class ProfileRuntimeResolution implements RuntimeResolution {
   computeLatestResolution(): Promise<ProfileRuntimeResolution> {
     const { installAnchor, home, profileDir } = this.#source
     return createRuntimeResolution({
-      installAnchor, home,
+      installAnchor, home, rereadInstallation: true,
       ...profileDir === undefined ? {} : { profile: loadProfileDirectory('dsh', profileDir, installAnchor) },
     })
   }

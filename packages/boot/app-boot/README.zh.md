@@ -66,6 +66,8 @@ profile 导入插件前，DSH 会将其声明的 DSH 版本要求与 `getDshRunt
 
 挂载 profile 条目前，`dsh` launcher 会从安装依赖图与有序 bundle 依赖图计算一份不可变的 runtime resolution。普通 Node、打包可执行文件与 Electron Host 等所有 profile 启动器都使用 runtime 解析，将 runtime resolution 安装到 Node 的 ESM 与 CommonJS 解析器中，不创建 fallback 链接。依赖遍历包含已安装的可选依赖，跳过目标安装中缺席的包。
 
+安装依赖图缓存在 `$DSH_HOME/cache/installation-scope.json`，键是安装本身的指纹：运行中应用 manifest 的大小与 mtime、存在时的 pnpm `.modules.yaml`，以及决定 manifest 是否按宽松方式读取的 skipped bundle 名称。命中时跳过“每个包读一次 `package.json`”的遍历（Windows 杀毒环境下 625 个包约 240 ms），打包负载实测第二次启动为 1.9 ms。未命中、缓存不可读、记录格式错误或 home 不可写都会回退到完整遍历；`computeLatestResolution()` 始终重新读取安装，因为它存在的意义就是看到变化。
+
 `sanitizeProfile(binName, profileDir, bundles)` 提供文件恢复，无需加载插件或解析 patch。Desktop 在原生致命错误恢复中调用它。调用前必须停止 profile 并排除并发 profile 写入。它将 profile 的 `cordis.patch.yml` 重命名为带唯一 `.bak-<timestamp>` 后缀的同目录备份，并恢复调用方指定的 bundle 列表，保留已安装包和其他 manifest 字段。时间戳为 Unix 毫秒数；同名备份已存在时追加序号（`-1`、`-2`、……），时间戳保持不变。返回值为备份路径；patch 不存在时返回 `undefined`，缺失的 profile 不会被创建。下次启动的 profile 初始化会重新创建空 patch。home 级 patch 不变。无效 profile JSON 在修改前报错；后续错误向调用方抛出，保留已完成的修改供重试。
 
 ### 预览生效配置
