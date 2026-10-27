@@ -27,8 +27,8 @@ import {
   assertStoredId, materializeCreateHeader, sessionFormatVersionRefusal, validateStoredEvents,
   type SessionAccess, type SessionHandle,
   type SessionHandleReadResult,
-  type SessionLocation, type SessionPersistenceCreateOptions,
-  type SessionPersistenceListOptions, type SessionPersistenceOpenOptions,
+  type SessionDeleteResult, type SessionLocation, type SessionPersistenceCreateOptions,
+  type SessionPersistenceDeleteOptions, type SessionPersistenceListOptions, type SessionPersistenceOpenOptions,
   type SessionPersistenceSnapshot, type SessionPersistenceStatOptions,
   type SessionPersistenceRevision as PersistenceRevision,
 } from '@deepseek-ai/dsh-session-persistence'
@@ -67,6 +67,15 @@ export type { JsonlCompression } from './format.ts'
 const COLD_LOG_MEMO_MAX_ENTRIES = 2
 
 const DEFAULT_COMPRESSION: JsonlCompression = 'zstd'
+
+/**
+ * Directory under the session root holding removed sessions until they age out.
+ * The leading underscore keeps it out of the project-directory layout.
+ */
+const TRASH_DIR = '_trash'
+
+/** Days a removed session stays recoverable before the mount-time sweep removes it. */
+export const TRASH_RETENTION_DAYS = 30
 /**
  * Internal scheduling constant, not deployment configuration: balance
  * frame-boundary event-loop yields against `setImmediate` overhead. One frame
@@ -621,6 +630,77 @@ class JsonlSessionPersistence extends SessionPersistence {
       if (isENOENT(error)) return undefined
       throw error
     }
+  }
+
+  /**
+   * Remove one stored session by parking its directory in the trash.
+   *
+   * The session directory is renamed into `<root>/_trash/<timestamp>-<id>/`, so
+   * the removal is reversible until {@link sweepTrash} ages it out; listing and
+   * opening stop seeing it immediately because they resolve from the project
+   * directories. A session open in any handle refuses: deleting under a live
+   * writer would let the next append recreate the artifact it just removed.
+   * @param id - the stored session to remove.
+   * @param options - optional cancellation.
+   * @returns the trash directory holding the removed artifacts.
+   * @throws {SessionPersistenceNotFoundError} when the session does not exist.
+   */
+  override async delete(id: SessionId, options?: SessionPersistenceDeleteOptions): Promise<SessionDeleteResult> {
+    const signal = options?.signal
+    signal?.throwIfAborted()
+    await this.ensureRootEncoding()
+    signal?.throwIfAborted()
+    if (this.tracker.pendingOf(id) !== undefined) {
+      throw new Error(`session "${id}" has not been written yet; close its handle instead of deleting it`)
+    }
+    for (const handle of this.tracker.openHandles) {
+      if (handle.id === id) throw new Error(`session "${id}" is open; close its handle before deleting it`)
+    }
+    const selected = await this.findLog(id, signal)
+    if (selected === undefined) throw new SessionPersistenceNotFoundError(id)
+    signal?.throwIfAborted()
+    const sessionDirectory = dirname(selected.sourcePath)
+    const trashRoot = join(this.root, TRASH_DIR)
+    await mkdir(trashRoot, { recursive: true, mode: 0o700 })
+    const destination = join(trashRoot, `${String(Date.now())}-${encodeSegment(id)}`)
+    await rename(sessionDirectory, destination)
+    // The parsed-log memo would otherwise serve a deleted session to a reader
+    // that already observed it; dropping the entry costs one re-read at most.
+    this.coldLogMemo.delete(id)
+    return { trashedPath: destination }
+  }
+
+  /**
+   * Permanently remove trash entries older than the retention window.
+   *
+   * Runs at mount beside the layout migration, so a store that is never opened
+   * does not accumulate recovery copies. An entry whose timestamp cannot be read
+   * is left alone: guessing its age could delete a session the user still wants
+   * back.
+   * @param retentionDays - days a removed session stays recoverable.
+   * @returns how many entries were removed.
+   */
+  override async sweepTrash(retentionDays: number): Promise<number> {
+    if (retentionDays <= 0) return 0
+    const trashRoot = join(this.root, TRASH_DIR)
+    let entries: string[]
+    try {
+      entries = await readdir(trashRoot)
+    } catch (error: unknown) {
+      if (isENOENT(error)) return 0
+      throw error
+    }
+    const cutoff = Date.now() - retentionDays * 24 * 60 * 60 * 1000
+    let removed = 0
+    for (const entry of entries) {
+      const match = /^(\d+)-/.exec(entry)
+      if (match?.[1] === undefined) continue
+      const stamp = Number(match[1])
+      if (!Number.isSafeInteger(stamp) || stamp >= cutoff) continue
+      await rm(join(trashRoot, entry), { recursive: true, force: true })
+      removed += 1
+    }
+    return removed
   }
 
   /**
@@ -1791,13 +1871,15 @@ class JsonlSessionPersistence extends SessionPersistence {
     }
   }
 
-  /** The human-readable project directories under the configured root. */
+  /** The project directories under the configured root, excluding the recycle bin. */
   private async listProjectDirs(signal?: AbortSignal): Promise<string[]> {
     try {
       signal?.throwIfAborted()
       const entries = await readdir(this.root, { withFileTypes: true })
       signal?.throwIfAborted()
-      return entries.filter(e => e.isDirectory()).map(e => join(this.root, e.name))
+      // A removed session parks in `_trash` with its header intact; scanning it
+      // would either resurrect it or report it as a misplaced log.
+      return entries.filter(e => e.isDirectory() && e.name !== TRASH_DIR).map(e => join(this.root, e.name))
     } catch (error) {
       // Only an absent root means no sessions; rethrow every other I/O failure.
       if (isENOENT(error)) return []
@@ -1964,4 +2046,10 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   // Layout migration finishes before this plugin's own load resolves, so no
   // consumer reads a store that is halfway between the two directory layouts.
   await backend?.migrateLegacyProjectKeys()
+  // Removed sessions are recoverable for a window; the mount is the only moment
+  // that sweep can run without competing with a live delete.
+  const swept = await backend?.sweepTrash(TRASH_RETENTION_DAYS)
+  if (swept !== undefined && swept > 0) {
+    ctx.logger.info(`session-persistence-jsonl: removed ${String(swept)} expired trash entr${swept === 1 ? 'y' : 'ies'}`)
+  }
 }

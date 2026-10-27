@@ -2468,6 +2468,19 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         returns: 'one snapshot per stored session.',
       },
       {
+        signature: 'delete?(id: SessionId, options?: SessionPersistenceDeleteOptions): Promise<SessionDeleteResult>',
+        description: 'Remove one stored session.\n\nA backend that can keep a recovery copy does so — the removal must be reversible for a retention window the backend documents — and reports where it parked it. The session must not be open in any handle: a delete racing a live writer would publish a log the writer immediately resurrects by appending, so an open handle refuses the delete instead of guessing.',
+        parameters: [{ name: 'id', description: 'the stored session to remove.' }, { name: 'options', description: 'optional cancellation.' }],
+        returns: 'where the removed artifacts went.',
+        throws: ['{SessionPersistenceNotFoundError} when the session does not exist.'],
+      },
+      {
+        signature: 'sweepTrash?(retentionDays: number): Promise<number>',
+        description: 'Remove recovery copies delete left older than a retention window.\n\nA backend without a recycle bin omits this. The sweep is destructive and runs where the backend chooses (the JSONL backend does it once at mount), so a store that is never opened does not accumulate copies.',
+        parameters: [{ name: 'retentionDays', description: 'days a removed session stays recoverable; `0` disables the sweep.' }],
+        returns: 'how many recovery copies were removed.',
+      },
+      {
         signature: 'availableBytes?(): Promise<number | undefined>',
         description: 'Free bytes the backing store can still accept, or `undefined` when this backend does not report free space.\n\nBackends that can answer implement it so the Agent loop can refuse a Turn the store could not record (see storageAdmission and StorageFullError) instead of failing halfway through one. The read must stay cheap and side-effect free: it runs once per Turn and must never create or repair storage to answer.',
         parameters: [],
@@ -7467,6 +7480,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface SessionCreateValue {\n    readonly sessionId: SessionId;\n    readonly agentPreset?: string;\n}',
   },
   {
+    name: 'SessionDeleteResult',
+    declaration: 'export interface SessionDeleteResult {\n    readonly trashedPath?: string;\n}',
+  },
+  {
     name: 'SessionEndInput',
     declaration: 'export interface SessionEndInput {\n    reason: \'clear\' | \'logout\' | \'prompt_input_exit\' | \'resume\' | \'other\';\n    sessionId: string;\n}',
   },
@@ -7697,6 +7714,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'SessionPersistenceCreateOptions',
     declaration: 'export interface SessionPersistenceCreateOptions {\n    readonly signal?: AbortSignal;\n    readonly inheritedEventCount?: SessionLogOffset;\n}',
+  },
+  {
+    name: 'SessionPersistenceDeleteOptions',
+    declaration: 'export interface SessionPersistenceDeleteOptions {\n    readonly signal?: AbortSignal;\n}',
   },
   {
     name: 'SessionPersistenceListOptions',

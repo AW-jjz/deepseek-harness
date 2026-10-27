@@ -118,6 +118,21 @@ export interface SessionPersistenceStatOptions {
   readonly signal?: AbortSignal
 }
 
+/** Options for {@link SessionPersistence.delete}. */
+export interface SessionPersistenceDeleteOptions {
+  /** Optional cancellation observed before backend work starts. */
+  readonly signal?: AbortSignal
+}
+
+/** Outcome of a durable Session removal. */
+export interface SessionDeleteResult {
+  /**
+   * Where the backend parked the removed session, when it keeps a recovery
+   * copy. Absent when the backend deleted the artifacts outright.
+   */
+  readonly trashedPath?: string
+}
+
 /** Options for {@link SessionPersistence.list}. */
 export interface SessionPersistenceListOptions {
   /** Optional cancellation for backend listing work. */
@@ -224,6 +239,32 @@ export abstract class SessionPersistence extends Service {
    * @returns one snapshot per stored session.
    */
   abstract list(options?: SessionPersistenceListOptions): Promise<readonly SessionPersistenceSnapshot[]>
+
+  /**
+   * Remove one stored session.
+   *
+   * A backend that can keep a recovery copy does so — the removal must be
+   * reversible for a retention window the backend documents — and reports where
+   * it parked it. The session must not be open in any handle: a delete racing a
+   * live writer would publish a log the writer immediately resurrects by
+   * appending, so an open handle refuses the delete instead of guessing.
+   * @param id - the stored session to remove.
+   * @param options - optional cancellation.
+   * @returns where the removed artifacts went.
+   * @throws {SessionPersistenceNotFoundError} when the session does not exist.
+   */
+  delete?(id: SessionId, options?: SessionPersistenceDeleteOptions): Promise<SessionDeleteResult>
+
+  /**
+   * Remove recovery copies {@link delete} left older than a retention window.
+   *
+   * A backend without a recycle bin omits this. The sweep is destructive and
+   * runs where the backend chooses (the JSONL backend does it once at mount),
+   * so a store that is never opened does not accumulate copies.
+   * @param retentionDays - days a removed session stays recoverable; `0` disables the sweep.
+   * @returns how many recovery copies were removed.
+   */
+  sweepTrash?(retentionDays: number): Promise<number>
 
   /**
    * Free bytes the backing store can still accept, or `undefined` when this
