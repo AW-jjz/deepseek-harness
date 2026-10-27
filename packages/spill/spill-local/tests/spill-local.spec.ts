@@ -26,6 +26,7 @@ import LocalSpillStore, {
   privateRoot,
   saveTextFile,
   sessionDir,
+  sweepSpillBudget,
   sweepSpillRoots,
 } from '@deepseek-ai/dsh-spill-local'
 import type { SweepRoot } from '@deepseek-ai/dsh-spill-local'
@@ -580,5 +581,117 @@ describe('isErrno', () => {
     expect(isErrno(err, 'EPERM')).toBe(false)
     expect(isErrno('not an error', 'ENOENT')).toBe(false)
     expect(isErrno(new Error('no code'), 'ENOENT')).toBe(false)
+  })
+})
+
+describe('spill size budget', () => {
+  /** Create one session directory holding files of the given sizes and ages. */
+  function seedSession(name: string, files: readonly { name: string; bytes: number; ageHours: number }[]): string {
+    const dir = join(root, name)
+    mkdirSync(dir, { recursive: true })
+    for (const file of files) {
+      writeAged(join(dir, file.name), 'x'.repeat(file.bytes), file.ageHours / 24)
+    }
+    return dir
+  }
+
+  const rootsOf = (): SweepRoot[] => [{ path: root, pruneWhenEmpty: false }]
+
+  it('reclaims the oldest files until the roots fit the budget', async () => {
+    const dir = seedSession('session-aaaaaaaaaaaa', [
+      { name: 'oldest.txt', bytes: 400, ageHours: 5 },
+      { name: 'middle.txt', bytes: 400, ageHours: 3 },
+      { name: 'newest.txt', bytes: 400, ageHours: 2 },
+    ])
+    const result = await sweepSpillBudget({
+      roots: rootsOf(), limitBytes: 500, protectSinceMs: Date.now() - 60 * 60 * 1000, warn: () => {},
+    })
+
+    expect(result).toEqual({ deletedFiles: 2, freedBytes: 800, remainingBytes: 400 })
+    expect(existsSync(join(dir, 'oldest.txt'))).toBe(false)
+    expect(existsSync(join(dir, 'middle.txt'))).toBe(false)
+    expect(existsSync(join(dir, 'newest.txt'))).toBe(true)
+  })
+
+  it('never reclaims a file written inside the protection window', async () => {
+    const dir = seedSession('session-bbbbbbbbbbbb', [
+      { name: 'fresh.txt', bytes: 900, ageHours: 0 },
+    ])
+    const result = await sweepSpillBudget({
+      roots: rootsOf(), limitBytes: 100, protectSinceMs: Date.now() - 60 * 60 * 1000, warn: () => {},
+    })
+
+    expect(result).toEqual({ deletedFiles: 0, freedBytes: 0, remainingBytes: 900 })
+    expect(existsSync(join(dir, 'fresh.txt'))).toBe(true)
+  })
+
+  it('does nothing while the roots are inside the budget', async () => {
+    seedSession('session-cccccccccccc', [{ name: 'a.txt', bytes: 100, ageHours: 4 }])
+    const result = await sweepSpillBudget({
+      roots: rootsOf(), limitBytes: 1_000, protectSinceMs: 0, warn: () => {},
+    })
+    expect(result).toEqual({ deletedFiles: 0, freedBytes: 0, remainingBytes: 100 })
+  })
+
+  it('leaves symlinks and foreign entries alone, and prunes the directory it emptied', async () => {
+    const dir = seedSession('session-dddddddddddd', [{ name: 'gone.txt', bytes: 500, ageHours: 5 }])
+    writeFileSync(join(root, 'stray.txt'), 'not spill')
+    const outside = join(root, 'outside.txt')
+    writeFileSync(outside, 'target')
+    symlinkSync(outside, join(dir, 'link.txt'))
+
+    const result = await sweepSpillBudget({
+      roots: rootsOf(), limitBytes: 0, protectSinceMs: Date.now(), warn: () => {},
+    })
+
+    expect(result.deletedFiles).toBe(1)
+    expect(existsSync(join(dir, 'gone.txt'))).toBe(false)
+    expect(existsSync(join(dir, 'link.txt'))).toBe(true)
+    expect(readFileSync(outside, 'utf8')).toBe('target')
+    expect(existsSync(join(root, 'stray.txt'))).toBe(true)
+  })
+
+  it('is enforced by the startup sweep and leaves a fresh spill readable', async () => {
+    const ctx = new Context()
+    const store = await ctx.plugin(LocalSpillStore, {
+      root, cleanupPeriodDays: 30, cleanupTotalBytes: 1_000, cleanupIntervalHours: 0,
+    })
+    try {
+      const dir = sessionDir(root, SessionId('budget-session'))
+      mkdirSync(dir, { recursive: true })
+      writeAged(join(dir, 'old.txt'), 'x'.repeat(5_000), 2)
+      const spilled = await ctx.spillStore.saveText(request({ content: 'y'.repeat(200) }))
+
+      // Disposal awaits the startup sweep, so the assertion below sees its result.
+      await store.dispose()
+      expect(existsSync(join(dir, 'old.txt'))).toBe(false)
+      expect(readFileSync(isAbsolute(spilled.locator) ? spilled.locator : String(spilled.locator), 'utf8')).toHaveLength(200)
+    } finally {
+      await ctx.fiber.dispose()
+    }
+  })
+
+  it('sweeps again on the configured interval', async () => {
+    vi.useFakeTimers()
+    const ctx = new Context()
+    try {
+      const store = await ctx.plugin(LocalSpillStore, {
+        root, cleanupPeriodDays: 30, cleanupTotalBytes: 1_000, cleanupIntervalHours: 1,
+      })
+      await vi.runOnlyPendingTimersAsync()
+      const dir = sessionDir(root, SessionId('interval-session'))
+      mkdirSync(dir, { recursive: true })
+      writeAged(join(dir, 'later.txt'), 'x'.repeat(4_000), 2)
+
+      // Advance past one interval so the timer fires and queues the sweep, then
+      // poll under real timers: the sweep itself is filesystem I/O, not a timer.
+      await vi.advanceTimersByTimeAsync(60 * 60 * 1000)
+      vi.useRealTimers()
+      await vi.waitFor(() => { expect(existsSync(join(dir, 'later.txt'))).toBe(false) })
+      await store.dispose()
+    } finally {
+      vi.useRealTimers()
+      await ctx.fiber.dispose()
+    }
   })
 })

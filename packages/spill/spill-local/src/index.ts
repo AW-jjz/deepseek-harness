@@ -15,17 +15,39 @@ import { tmpdir } from 'node:os'
 import z from '@deepseek-ai/schemastery'
 import { SpillLocator, SpillStore } from '@deepseek-ai/dsh-spill'
 import type { SaveTextSpill, SpillRef } from '@deepseek-ai/dsh-spill'
-import { gatherSweepRoots, sweepSpillRoots } from './cleanup.ts'
+import { gatherSweepRoots, sweepSpillBudget, sweepSpillRoots } from './cleanup.ts'
 import type { SweepRoot, WarnFn } from './cleanup.ts'
 import { privateRoot, saveTextFile } from './store.ts'
 
-export { discoverDefaultRoots, sweepSpillRoots } from './cleanup.ts'
-export type { SweepOptions, SweepRoot, WarnFn } from './cleanup.ts'
+export { discoverDefaultRoots, sweepSpillBudget, sweepSpillRoots } from './cleanup.ts'
+export type {
+  SpillBudgetOptions, SpillBudgetResult, SpillFileUsage, SweepOptions, SweepRoot, WarnFn,
+} from './cleanup.ts'
 export { DEFAULT_ROOT_PREFIX, encodeSegment, isErrno, privateRoot, saveTextFile, sessionDir } from './store.ts'
 export type { SavedText, SaveTextOptions } from './store.ts'
 
 /** Milliseconds in one day — converts the `cleanupPeriodDays` config to the sweep cutoff. */
 const MS_PER_DAY = 24 * 60 * 60 * 1000
+
+/** Milliseconds in one hour — converts `cleanupIntervalHours` to the timer period. */
+const MS_PER_HOUR = 60 * 60 * 1000
+
+/**
+ * How recently a file must have been written to be exempt from the size budget.
+ *
+ * Age retention answers "how long may a locator live"; the budget answers "how
+ * much disk may spill hold". A session that is still running can read a file it
+ * wrote minutes ago, so the budget only reclaims older files — the age sweep
+ * remains the only thing that deletes fresh text, and it never deletes anything
+ * younger than `cleanupPeriodDays`.
+ */
+const BUDGET_PROTECT_MS = MS_PER_HOUR
+
+/** Default total-byte budget for spill files; `0` disables the budget. */
+const DEFAULT_CLEANUP_TOTAL_BYTES = 512 * 1024 * 1024
+
+/** Default hours between background sweeps; `0` keeps the sweep startup-only. */
+const DEFAULT_CLEANUP_INTERVAL_HOURS = 6
 
 /** Plugin config (all optional — `static Config` supplies the defaults). */
 export interface Config {
@@ -46,6 +68,19 @@ export interface Config {
    * ages out.
    */
   cleanupPeriodDays?: number
+  /**
+   * Total bytes all spill roots may hold. Older files are reclaimed until the
+   * roots fit, oldest first, after the age sweep. Files written in the last hour
+   * are never reclaimed for the budget, because a running session may still read
+   * what it just spilled. Defaults to 512 MiB; `0` disables the budget.
+   */
+  cleanupTotalBytes?: number
+  /**
+   * Hours between background sweeps after the startup one. Defaults to `6`; `0`
+   * keeps cleanup startup-only. Runs are serialized with the startup sweep, so a
+   * slow disk delays the next run instead of overlapping it.
+   */
+  cleanupIntervalHours?: number
 }
 
 /** The shape after schemastery applied the defaults. */
@@ -66,6 +101,8 @@ export class LocalSpillStore extends SpillStore {
   static Config: z<Config> = z.object({
     root: z.string(),
     cleanupPeriodDays: z.number().step(1).min(0).default(30),
+    cleanupTotalBytes: z.number().step(1).min(0).default(DEFAULT_CLEANUP_TOTAL_BYTES),
+    cleanupIntervalHours: z.number().min(0).default(DEFAULT_CLEANUP_INTERVAL_HOURS),
   })
 
   /** Resolved absolute spill root (config `root`, else the private default), fixed at construction. */
@@ -74,11 +111,8 @@ export class LocalSpillStore extends SpillStore {
   /** Validated config (schemastery applied the `cleanupPeriodDays` default before construction). */
   readonly config: ResolvedConfig
 
-  /**
-   * The in-flight (or settled) startup cleanup sweep. Held so disposal can await
-   * it; `undefined` when cleanup is disabled (`cleanupPeriodDays === 0`).
-   */
-  private cleanup: Promise<void> | undefined
+  /** Serializes background sweeps behind the startup one; disposal awaits it. */
+  private sweepChain: Promise<void> = Promise.resolve()
 
   constructor(ctx: Context, config: Config) {
     super(ctx)
@@ -93,19 +127,42 @@ export class LocalSpillStore extends SpillStore {
     // never delayed yet a fiber unload reaches quiescence (no sweep I/O outlives
     // the fiber). Disabled (`cleanupPeriodDays === 0`) yields a no-op disposer.
     ctx.effect(function* (this: LocalSpillStore) {
+      let timer: NodeJS.Timeout | undefined
       if (this.config.cleanupPeriodDays > 0) {
         const warn: WarnFn = (message) => { this.ctx.logger.warn(message) }
-        this.cleanup = this.runCleanup(warn)
+        void this.scheduleSweep(warn)
+        if (this.config.cleanupIntervalHours > 0) {
+          timer = setInterval(() => { void this.scheduleSweep(warn) }, this.config.cleanupIntervalHours * MS_PER_HOUR)
+          // A background sweep must never hold the process open.
+          timer.unref()
+        }
       }
-      yield async () => { await this.cleanup }
+      yield async () => {
+        if (timer !== undefined) clearInterval(timer)
+        await this.sweepChain
+      }
     }.bind(this), 'spill-local cleanup sweep')
   }
 
   /**
-   * Run the one-shot cleanup: gather the roots to sweep (see {@link gatherRoots})
-   * and sweep all of them at the age cutoff. Best-effort —
-   * {@link sweepSpillRoots} contains every filesystem failure, so this never
-   * rejects and cannot fail activation or a concurrent spill write.
+   * Queue one sweep behind any running sweep.
+   *
+   * Serialization matters for more than tidiness: two concurrent passes could
+   * both decide a session directory is empty and both try to prune it, and the
+   * budget pass measures totals that a concurrent age pass would invalidate.
+   * @param warn - sink for a contained filesystem failure.
+   * @returns resolves when this sweep and everything queued before it finished.
+   */
+  private scheduleSweep(warn: WarnFn): Promise<void> {
+    this.sweepChain = this.sweepChain.then(() => this.runCleanup(warn))
+    return this.sweepChain
+  }
+
+  /**
+   * Run one cleanup: gather the roots to sweep (see {@link gatherRoots}), apply
+   * the age cutoff, then the byte budget. Best-effort — both sweeps contain every
+   * filesystem failure, so this never rejects and cannot fail activation or a
+   * concurrent spill write.
    *
    * @param warn - sink for a contained filesystem failure.
    * @returns Resolves when the sweep finishes (never rejects).
@@ -114,6 +171,19 @@ export class LocalSpillStore extends SpillStore {
     const cutoffMs = Date.now() - this.config.cleanupPeriodDays * MS_PER_DAY
     const roots = await this.gatherRoots(warn)
     await sweepSpillRoots({ roots, cutoffMs, warn })
+    if (this.config.cleanupTotalBytes <= 0) return
+    const result = await sweepSpillBudget({
+      roots,
+      limitBytes: this.config.cleanupTotalBytes,
+      protectSinceMs: Date.now() - BUDGET_PROTECT_MS,
+      warn,
+    })
+    if (result.deletedFiles > 0) {
+      this.ctx.logger.info(
+        `spill-local: reclaimed ${String(result.deletedFiles)} file(s), `
+        + `${String(result.freedBytes)} bytes; ${String(result.remainingBytes)} bytes remain`,
+      )
+    }
   }
 
   /**

@@ -429,3 +429,166 @@ export async function gatherSweepRoots(
   if (active !== undefined) roots.set(active.identity, { path: active.path, pruneWhenEmpty: false })
   return [...roots.values()]
 }
+
+/** One regular spill file the budget sweep may reclaim. */
+export interface SpillFileUsage {
+  /** Absolute path of a regular spill file. */
+  readonly path: string
+  /** Size in bytes as the last `lstat` reported it. */
+  readonly bytes: number
+  /** Modification time, the order the budget reclaims in (oldest first). */
+  readonly mtimeMs: number
+}
+
+/** What one budget sweep reclaimed, for the Host log. */
+export interface SpillBudgetResult {
+  /** Files deleted to get under the limit. */
+  readonly deletedFiles: number
+  /** Bytes those files occupied. */
+  readonly freedBytes: number
+  /** Bytes the swept roots still hold afterwards. */
+  readonly remainingBytes: number
+}
+
+/** Options for one size-budget sweep. */
+export interface SpillBudgetOptions {
+  /** Roots to measure and reclaim from. */
+  roots: SweepRoot[]
+  /** Total bytes the roots may keep; oldest files above it are deleted. */
+  limitBytes: number
+  /**
+   * Files modified at or after this instant are never deleted for budget: a
+   * session that is still writing must not lose the text it can still read.
+   */
+  protectSinceMs: number
+  /** Where a contained filesystem failure is reported; the sweep never throws. */
+  warn: WarnFn
+}
+
+/**
+ * Enforce a total-byte budget across spill roots, oldest files first.
+ *
+ * Age retention and a size budget answer different questions — "how long may a
+ * locator live" and "how much disk may spill hold" — so this runs independently
+ * of {@link sweepSpillRoots}. Only regular files inside trusted `session-*`
+ * directories are candidates, symlinks and foreign entries are never followed,
+ * and every failure is contained so a Host can run this on a timer.
+ *
+ * @param options The roots, the byte limit, the protection cutoff, and the failure sink.
+ * @returns What was reclaimed, for the caller's log.
+ */
+export async function sweepSpillBudget(options: SpillBudgetOptions): Promise<SpillBudgetResult> {
+  const { limitBytes, protectSinceMs, warn } = options
+  const roots = new Map<string, SweepRoot>()
+  for (const candidate of options.roots) {
+    const resolved = await resolveRoot(candidate.path, false, warn)
+    if (resolved === undefined) continue
+    const existing = roots.get(resolved.identity)
+    roots.set(resolved.identity, {
+      path: resolved.path,
+      pruneWhenEmpty: (existing?.pruneWhenEmpty ?? true) && candidate.pruneWhenEmpty,
+    })
+  }
+  const files: SpillFileUsage[] = []
+  const sessionDirs: { dir: string; root: SweepRoot }[] = []
+  for (const root of roots.values()) {
+    let entries: string[]
+    try {
+      entries = await readdir(root.path)
+    } catch (error: unknown) {
+      /* v8 ignore start -- the root was resolved immediately above; a read
+         failure now requires a race or a host ACL fault. */
+      if (!isErrno(error, 'ENOENT')) warnSafely(warn, `spill-local: failed to read root ${root.path}: ${String(error)}`)
+      continue
+      /* v8 ignore stop */
+    }
+    for (const name of entries) {
+      if (!SESSION_DIR_RE.test(name)) continue
+      const dir = join(root.path, name)
+      let stats: Stats
+      try {
+        stats = await lstat(dir)
+      } catch (error: unknown) {
+        /* v8 ignore start -- an entry readdir just returned fails to lstat only
+           by racing away (ENOENT) or a permission/IO fault. */
+        if (!isErrno(error, 'ENOENT')) warnSafely(warn, `spill-local: failed to stat ${dir}: ${String(error)}`)
+        continue
+        /* v8 ignore stop */
+      }
+      if (!isTrustedDirectory(stats)) {
+        warnSafely(warn, `spill-local: skipped unsafe session directory ${dir}`)
+        continue
+      }
+      sessionDirs.push({ dir, root })
+      let names: string[]
+      try {
+        names = await readdir(dir)
+      } catch (error: unknown) {
+        /* v8 ignore start -- the directory was just lstat'd as real; a failure
+           here is a race or an ACL fault. */
+        warnSafely(warn, `spill-local: failed to read ${dir}: ${String(error)}`)
+        continue
+        /* v8 ignore stop */
+      }
+      for (const entry of names) {
+        const path = join(dir, entry)
+        let entryStats: Stats
+        try {
+          entryStats = await lstat(path)
+        } catch (error: unknown) {
+          /* v8 ignore start -- an entry that races away between readdir and
+             lstat, or an ACL/IO fault; skip it. */
+          if (!isErrno(error, 'ENOENT')) warnSafely(warn, `spill-local: failed to stat ${path}: ${String(error)}`)
+          continue
+          /* v8 ignore stop */
+        }
+        if (!entryStats.isFile()) continue
+        files.push({ path, bytes: entryStats.size, mtimeMs: entryStats.mtimeMs })
+      }
+    }
+  }
+
+  let total = files.reduce((sum, file) => sum + file.bytes, 0)
+  let deletedFiles = 0
+  let freedBytes = 0
+  if (total > limitBytes) {
+    const reclaimable = files
+      .filter(file => file.mtimeMs < protectSinceMs)
+      .sort((left, right) => left.mtimeMs - right.mtimeMs)
+    for (const file of reclaimable) {
+      if (total <= limitBytes) break
+      await unlinkIdempotent(file.path, warn)
+      total -= file.bytes
+      freedBytes += file.bytes
+      deletedFiles++
+    }
+  }
+
+  // Reclaim the directories this pass emptied, then any discovered root that is
+  // now empty; a live root is never itself removed.
+  for (const { dir, root } of sessionDirs) {
+    let remaining: string[]
+    try {
+      remaining = await readdir(dir)
+    } catch (error: unknown) {
+      /* v8 ignore start -- a directory that raced away is already gone. */
+      if (!isErrno(error, 'ENOENT')) warnSafely(warn, `spill-local: failed to read ${dir}: ${String(error)}`)
+      continue
+      /* v8 ignore stop */
+    }
+    if (remaining.length > 0) continue
+    try {
+      await rmdir(dir)
+    } catch (error: unknown) {
+      /* v8 ignore start -- prune runs only on a directory observed empty; a
+         failure here means a concurrent write (ENOTEMPTY) or an ACL fault. */
+      if (!isErrno(error, 'ENOENT') && !isErrno(error, 'ENOTEMPTY')) {
+        warnSafely(warn, `spill-local: failed to prune ${dir}: ${String(error)}`)
+      }
+      continue
+      /* v8 ignore stop */
+    }
+    void root
+  }
+  return { deletedFiles, freedBytes, remainingBytes: total }
+}

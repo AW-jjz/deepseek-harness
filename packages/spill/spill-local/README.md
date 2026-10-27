@@ -36,12 +36,16 @@ Loading the plugin with no config is safe: files land in a lazily-created privat
   config:
     root: /absolute/path/to/spill
     cleanupPeriodDays: 30
+    cleanupTotalBytes: 536870912
+    cleanupIntervalHours: 6
 ```
 
 | Field | Default | Meaning |
 |---|---|---|
 | `root` | private 0700 temp dir | Root directory for spill files; set to keep them under a known location |
-| `cleanupPeriodDays` | `30` | File age in days before the one-shot startup cleanup may delete it; `0` disables cleanup |
+| `cleanupPeriodDays` | `30` | File age in days before cleanup may delete it; `0` disables cleanup entirely |
+| `cleanupTotalBytes` | `536870912` (512 MiB) | Total bytes all spill roots may hold; the oldest files are reclaimed until the roots fit. Files written in the last hour are never reclaimed for the budget; `0` disables it |
+| `cleanupIntervalHours` | `6` | Hours between background sweeps after the startup one; `0` keeps cleanup startup-only |
 
 The generated [configuration catalog](../../../docs/config-catalog.md#deepseek-aidsh-spill-local) is the exhaustive source for every accepted field.
 
@@ -56,7 +60,7 @@ Files are stored at `<root>/session-<hash>/<random>-<safeName>`, where `session-
 <a id="startup-cleanup"></a>
 ### Startup cleanup
 
-One best-effort sweep starts after activation without delaying service availability. It scans the configured root and prior default `dsh-spill-*` roots under the OS temp directory, deletes regular files whose modification time is strictly older than the configured cutoff, prunes empty session directories, and removes only empty prior-default roots. A long-lived process does not sweep again until restart. Disposal waits for the sweep, and a concurrent write recreates a session directory if cleanup removes it.
+One best-effort sweep starts after activation without delaying service availability, and repeats every `cleanupIntervalHours`. Each run scans the configured root and prior default `dsh-spill-*` roots under the OS temp directory, deletes regular files whose modification time is strictly older than `cleanupPeriodDays`, then enforces `cleanupTotalBytes` by reclaiming the oldest remaining files until the roots fit, prunes empty session directories, and removes only empty prior-default roots. Age and size answer different questions — how long a locator may live, and how much disk spill may hold — so a store under its byte budget still ages out old text, and a store with young text still shrinks when it exceeds the budget. Files written in the last hour are never reclaimed for the budget: a running session may still read what it just spilled. Runs are serialized, so a slow disk delays the next run instead of overlapping it, and disposal waits for the queued runs; a concurrent write recreates a session directory if cleanup removes it.
 
 The sweep resolves filesystem identities, never follows or deletes symlinks, and skips unrelated entries. On POSIX it admits only roots and session directories owned by the current user, not writable by group or others, and protected from replacement through their ancestor path; writable sticky temporary directories such as `/tmp` are permitted. Unsafe paths produce a warning and remain untouched. Filesystem and warning-sink failures are contained, so cleanup cannot fail activation or a concurrent spill write.
 

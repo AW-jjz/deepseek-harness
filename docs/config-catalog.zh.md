@@ -3249,7 +3249,7 @@ export interface Config {
 
 ## `@deepseek-ai/dsh-spill-local`
 
-- `source`: [`packages/spill/spill-local/src/index.ts:31`](../packages/spill/spill-local/src/index.ts)
+- `source`: [`packages/spill/spill-local/src/index.ts:53`](../packages/spill/spill-local/src/index.ts)
 
 ```ts config-catalog
 /** Plugin config (all optional — `static Config` supplies the defaults). */
@@ -3271,6 +3271,19 @@ export interface Config {
    * ages out.
    */
   cleanupPeriodDays?: number
+  /**
+   * Total bytes all spill roots may hold. Older files are reclaimed until the
+   * roots fit, oldest first, after the age sweep. Files written in the last hour
+   * are never reclaimed for the budget, because a running session may still read
+   * what it just spilled. Defaults to 512 MiB; `0` disables the budget.
+   */
+  cleanupTotalBytes?: number
+  /**
+   * Hours between background sweeps after the startup one. Defaults to `6`; `0`
+   * keeps cleanup startup-only. Runs are serialized with the startup sweep, so a
+   * slow disk delays the next run instead of overlapping it.
+   */
+  cleanupIntervalHours?: number
 }
 ```
 <!-- END GENERATED config-catalog:@deepseek-ai/dsh-spill-local -->
