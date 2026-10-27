@@ -85,13 +85,28 @@ describe('approveEscalation', () => {
     const granted = await approveEscalation(req(), ingredients({ approver: approver('allowed-once', r => seen.push(r as { reason?: string })) }))
     expect(granted).toBe('workspace-write')
     expect(seen[0]?.reason).toBe('escalate sandbox to workspace-write: the user asked to write in the workspace')
+    // The prompt names the permission and its consequence in the reader's
+    // language; the internal id stays in the audit reason above.
     expect(seen[0]).toMatchObject({
       displayReason: {
-        en: 'Allow this operation with workspace-write permissions: the user asked to write in the workspace',
-        zh: '允许本次操作使用 workspace-write 权限：the user asked to write in the workspace',
-        ja: 'workspace-write 権限でこの操作を許可します：the user asked to write in the workspace',
+        en: 'Allow this operation with workspace-write permissions — it can write inside this workspace only: the user asked to write in the workspace',
+        zh: '允许本次操作使用「工作区写入」权限——它只能在工作区目录内写入：the user asked to write in the workspace',
+        ja: 'この操作を「ワークスペース書き込み」権限で許可します（このワークスペースの中だけに書き込めます）：the user asked to write in the workspace',
       },
     })
+  })
+
+  it.each(ESCALATION_TARGETS)('names %s in the reading language instead of pasting the id', async (mode) => {
+    const seen: { displayReason?: Record<string, string> }[] = []
+    await approveEscalation(req({ requestedMode: mode }), ingredients({ approver: approver('allowed-once', r => seen.push(r as { displayReason?: Record<string, string> })) }))
+    const display = seen[0]?.displayReason
+    expect(display).toBeDefined()
+    // Every non-English locale must read as prose: the id is a config value, and it
+    // stays in the audit reason and the tool call's own argument.
+    for (const locale of ['zh', 'ja', 'es', 'fr', 'de', 'ru', 'pt'] as const) {
+      expect(display?.[locale]).not.toContain(mode)
+    }
+    for (const text of Object.values(display ?? {})) expect(text).toContain('write in the workspace')
   })
 
   it.each(ESCALATION_TARGETS)('repeating %s succeeds without asking for approval', async (mode) => {
