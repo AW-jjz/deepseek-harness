@@ -31,8 +31,12 @@ function setup(locale = 'en') {
   let current = resolveDesktopLocale(locale)
   const open = vi.fn()
   const quit = vi.fn()
-  const tray = new DesktopTray({ iconPath: 'C:/app/resources/tray.ico', locale: () => current, open, quit })
-  return { tray, open, quit, native: native.trays[0]!, setLocale: (next: string) => { current = resolveDesktopLocale(next) } }
+  const toggleStartAtLogin = vi.fn()
+  let startAtLogin = false
+  const tray = new DesktopTray({ iconPath: 'C:/app/resources/tray.ico', locale: () => current, open, quit,
+    startAtLogin: () => startAtLogin, toggleStartAtLogin })
+  return { tray, open, quit, toggleStartAtLogin, setStartAtLogin: (next: boolean) => { startAtLogin = next },
+    native: native.trays[0]!, setLocale: (next: string) => { current = resolveDesktopLocale(next) } }
 }
 
 function labels(menu: MenuItemConstructorOptions[]): (string | undefined)[] {
@@ -44,7 +48,9 @@ it('shows the application icon with its name as the tooltip and an Open / Quit m
   expect(native.createFromPath).toHaveBeenCalledWith('C:/app/resources/tray.ico')
   expect(f.native.image).toEqual({ path: 'C:/app/resources/tray.ico' })
   expect(f.native.setToolTip).toHaveBeenCalledWith('DeepSeek Harness')
-  expect(labels(native.menus[0]!)).toEqual(['Open DeepSeek Harness', 'separator', 'Quit DeepSeek Harness'])
+  expect(labels(native.menus[0]!)).toEqual([
+    'Open DeepSeek Harness', 'separator', 'Start at login', 'separator', 'Quit DeepSeek Harness',
+  ])
   expect(f.native.setContextMenu).toHaveBeenCalledWith({ template: native.menus[0] })
 })
 
@@ -54,16 +60,28 @@ it('opens the window on a single click and routes menu entries to the open and q
   expect(f.open).toHaveBeenCalledOnce()
   const menu = native.menus[0]!
   ;(menu[0] as { click: () => void }).click()
-  ;(menu[2] as { click: () => void }).click()
+  ;(menu[4] as { click: () => void }).click()
   expect(f.open).toHaveBeenCalledTimes(2)
   expect(f.quit).toHaveBeenCalledOnce()
+})
+
+it('marks the login item and routes the toggle', () => {
+  const f = setup()
+  f.setStartAtLogin(true)
+  f.tray.relabel()
+  const toggle = native.menus.at(-1)![2] as { type?: string; checked?: boolean; click: () => void }
+  expect(toggle).toMatchObject({ type: 'checkbox', checked: true })
+  toggle.click()
+  expect(f.toggleStartAtLogin).toHaveBeenCalledOnce()
 })
 
 it('relabels the menu in the current locale and ignores relabel after disposal', () => {
   const f = setup()
   f.setLocale('zh')
   f.tray.relabel()
-  expect(labels(native.menus[1]!)).toEqual(['打开 DeepSeek Harness', 'separator', '退出 DeepSeek Harness'])
+  expect(labels(native.menus[1]!)).toEqual([
+    '打开 DeepSeek Harness', 'separator', '登录时启动', 'separator', '退出 DeepSeek Harness',
+  ])
   f.tray.dispose()
   f.tray.dispose()
   expect(f.native.destroy).toHaveBeenCalledOnce()

@@ -56,7 +56,11 @@ let disposeActiveHandlers: (() => void) | undefined
  * @param operations - credential write and this-launch-only skip actions.
  * @returns the visible window; a failed load destroys it before rejecting.
  */
-export async function openWelcomeWindow(locale: DesktopLocale, operations: WelcomeOperations): Promise<BrowserWindow> {
+export async function openWelcomeWindow(
+  locale: DesktopLocale,
+  operations: WelcomeOperations,
+  presentation: { show?: boolean } = {},
+): Promise<BrowserWindow> {
   const options = welcomeWindowOptions(process.platform, locale)
   const window = new BrowserWindow(options)
   disposeActiveHandlers?.()
@@ -123,10 +127,13 @@ export async function openWelcomeWindow(locale: DesktopLocale, operations: Welco
     if (!window.isDestroyed()) window.destroy()
     throw error
   }
-  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- Another window can replace ownership during loadFile.
+  // Another window can replace ownership during loadFile, so `active` is re-read here.
   if (active && !window.isDestroyed()) {
-    window.show()
-    void operations.analytics?.('auth_page_view', {})
+    // A login-item launch leaves the window ready but unshown; the tray opens it.
+    if (presentation.show !== false) {
+      window.show()
+      void operations.analytics?.('auth_page_view', {})
+    }
   }
   return window
 }

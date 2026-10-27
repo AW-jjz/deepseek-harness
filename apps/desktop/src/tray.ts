@@ -12,6 +12,10 @@ export interface DesktopTrayOptions {
   readonly open: () => void
   /** Request quit through the same confirmation as every other quit entry. */
   readonly quit: () => void
+  /** Whether the OS currently starts the shell at login. */
+  readonly startAtLogin: () => boolean
+  /** Register or remove the login item and persist the choice. */
+  readonly toggleStartAtLogin: () => void
 }
 
 /** Tray icon present for the whole run, not only while the window is hidden. */
@@ -34,6 +38,9 @@ export class DesktopTray {
     tray.setToolTip(messages.aboutProduct)
     tray.setContextMenu(Menu.buildFromTemplate([
       { label: messages.openApplication, click: () => { this.options.open() } },
+      { type: 'separator' },
+      { label: messages.startAtLogin, type: 'checkbox', checked: this.options.startAtLogin(),
+        click: () => { this.options.toggleStartAtLogin() } },
       { type: 'separator' },
       { label: messages.quitApplication, click: () => { this.options.quit() } },
     ]))

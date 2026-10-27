@@ -59,7 +59,8 @@ import { DesktopMandatoryUpdatePolicy, resolveDesktopPolicyConfig, type DesktopP
 import { desktopClientMetadata, desktopClientVersion } from './client-metadata.ts'
 import { DesktopMandatoryUpdateWindow } from './mandatory-update-window.ts'
 import { DesktopPolicyTestAuth } from './policy-test-auth.ts'
-import { readDesktopSettings } from './settings.ts'
+import { readDesktopSettings, writeStartAtLogin } from './settings.ts'
+import { applyStartAtLogin, launchedHidden, launchOrigin, startAtLoginEnabled } from './login-item.ts'
 import { DesktopUpdateDialog, type UpdateDialogOptions } from './update-dialog.ts'
 import { readDesktopRuntime } from './runtime-tree.ts'
 import { DesktopBrowserGuests } from './browser-guests.ts'
@@ -373,6 +374,25 @@ function createWindow(preload: string, show = false, primary = false, placement?
 
 async function main(): Promise<void> {
   const desktopSettings = readDesktopSettings(app.getPath('userData'))
+  // A login-item launch must not steal focus at boot: the tray is the way in.
+  // Cleared the first time the user opens a window from the tray.
+  let startupHidden = launchedHidden(launchOrigin(process.argv))
+  // Reconcile the OS entry with the stored preference so an externally removed
+  // login item comes back on the next start.
+  try { applyStartAtLogin(desktopSettings.launch.startAtLogin) } catch (error) {
+    console.warn('desktop login item: unavailable', error)
+  }
+  const toggleStartAtLogin = (): void => {
+    const next = !startAtLoginEnabled()
+    try { applyStartAtLogin(next) } catch (error) {
+      console.warn('desktop login item: unavailable', error)
+      return
+    }
+    void writeStartAtLogin(app.getPath('userData'), next).catch((error: unknown) => {
+      console.warn('desktop settings: the login-item preference was not saved', error)
+    })
+    refreshApplicationMenu()
+  }
   void pruneCrashReports(app.getPath('logs'))
   const journalDirectory = process.env.DSH_DESKTOP_UPDATE_JOURNAL_DIR
   const updateJournal = journalDirectory === undefined ? undefined : new DesktopUpdateJournal(journalDirectory, app.getVersion())
@@ -1038,6 +1058,10 @@ async function main(): Promise<void> {
       : { label: currentDesktopLocale().messages.aboutMenu, role: 'about' },
     { type: 'separator' },
     { label: currentDesktopLocale().messages.checkUpdatesMenu, click: () => { void openUpdatePrompt(true) } },
+    ...process.platform === 'darwin' ? [{
+      label: currentDesktopLocale().messages.startAtLogin, type: 'checkbox' as const,
+      checked: startAtLoginEnabled(), click: () => { toggleStartAtLogin() },
+    }] : [],
     ...process.platform === 'darwin' || process.platform === 'win32'
       ? [{ label: currentDesktopLocale().messages.cliCommandMenu, click: () => { void commandManager.show() } }] : [],
     ...development ? [
@@ -1073,7 +1097,9 @@ async function main(): Promise<void> {
     // The tray is the way back to a hidden window; without it, relaunching the application still focuses it.
     try {
       tray = new DesktopTray({ iconPath: trayIconPath, locale: currentDesktopLocale,
-        open: () => { focusPrimaryWindow() }, quit: () => { app.quit() } })
+        open: () => { focusPrimaryWindow() }, quit: () => { app.quit() },
+        startAtLogin: () => { try { return startAtLoginEnabled() } catch { return false } },
+        toggleStartAtLogin: () => { toggleStartAtLogin() } })
     } catch (error) { console.warn('desktop tray: unavailable', error) }
   }
   const backgroundNotice = process.platform === 'win32'
@@ -1234,8 +1260,9 @@ async function main(): Promise<void> {
     const window = mainWindow ?? createMainWindow()
     await navigateMain(applicationUrl)
     if (isQuitting() || recovery.active || window.isDestroyed()) return
-    if (activate) window.show()
-    else window.showInactive()
+    if (!activate) window.showInactive()
+    else if (startupHidden) startupHidden = false
+    else window.show()
     enteredWorkspace = true
     if (welcomeWindow !== undefined) {
       welcomeWindow.close()
@@ -1256,6 +1283,7 @@ async function main(): Promise<void> {
     if (quitting) return Promise.resolve()
     if (welcomeWindow !== undefined && !welcomeWindow.isDestroyed()) {
       if (!welcomeWindow.isVisible()) void track('auth_page_view', {})
+      startupHidden = false
       welcomeWindow.show()
       welcomeWindow.focus()
       return Promise.resolve()
@@ -1292,7 +1320,7 @@ async function main(): Promise<void> {
           return { ok: true }
         },
         skip: enterWorkspace,
-      })
+      }, { show: !startupHidden })
       const window = welcomeWindow
       window.once('closed', () => {
         void welcomeBackend?.account.state().then((state) => {
