@@ -33,6 +33,7 @@ import { ForkSessionMenuItem } from '../src/client/session-actions/ForkSession.t
 import { PinSessionMenuItem, PinSessionRowButton } from '../src/client/session-actions/PinSession.tsx'
 import { RenameSessionMenuItem, SessionRenameDialog } from '../src/client/session-actions/RenameSession.tsx'
 import { RowActionToast } from '../src/client/session-actions/RowActionToast.tsx'
+import { DeleteSessionMenuItem } from '../src/client/session-actions/DeleteSession.tsx'
 import { SessionIdMenuItem } from '../src/client/session-actions/SessionId.tsx'
 import { createWorkspaceViewStore } from '../src/client/stores.ts'
 import { en, zh } from '../src/client/locales.ts'
@@ -611,7 +612,7 @@ describe('RowActionToast', () => {
         subscribe: listener => view.subscribe(listener),
       }),
     }, {
-      undoArchive, showArchived, openForkSource,
+      undoArchive, showArchived, openForkSource, undoDelete: vi.fn(),
     })
     runtime.slots.register({
       name: 'shell.overlay', id: 'workspace.row-toast',
@@ -863,4 +864,36 @@ it('shows effective Session shortcuts while menu clicks keep the row target', ()
   expect(requestSessionRename).toHaveBeenCalledWith(ROW.sessionId, ROW.displayTitle)
   expect(forkSession).toHaveBeenCalledWith(ROW.sessionId)
   expect(archiveSession).toHaveBeenCalledWith(ROW.sessionId)
+})
+
+describe('delete action', () => {
+  /** The delete share over fixed membership and one recording callback. */
+  const deleteShare = (live: readonly string[] = [], archived: readonly string[] = []) => ({
+    useLive: hook(idSet(...live)),
+    useArchived: hook(idSet(...archived)),
+    deleteSession: vi.fn(),
+  })
+  const allowed = () => true
+
+  it('removes the session through the injected callback after closing the menu', () => {
+    const { state, setMenuOpen } = openMenu()
+    const share = deleteShare()
+    render(<DeleteSessionMenuItem {...menuRow(state)} {...share} useSessionAccess={allowed} />)
+    fireEvent.click(screen.getByRole('menuitem', { name: '删除会话' }))
+    expect(setMenuOpen).toHaveBeenCalledWith(false)
+    expect(share.deleteSession).toHaveBeenCalledExactlyOnceWith(sid('one'))
+    expect(callOrder(setMenuOpen)).toBeLessThan(callOrder(share.deleteSession))
+  })
+
+  it('is absent for a running session, an archived row, and a caller without access', () => {
+    const { state } = openMenu()
+    const running = render(<DeleteSessionMenuItem {...menuRow(state)} {...deleteShare(['one'])} useSessionAccess={allowed} />)
+    expect(running.queryByRole('menuitem')).toBeNull()
+    running.unmount()
+    const archived = render(<DeleteSessionMenuItem {...menuRow(state)} {...deleteShare([], ['one'])} useSessionAccess={allowed} />)
+    expect(archived.queryByRole('menuitem')).toBeNull()
+    archived.unmount()
+    const denied = render(<DeleteSessionMenuItem {...menuRow(state)} {...deleteShare()} useSessionAccess={() => false} />)
+    expect(denied.queryByRole('menuitem')).toBeNull()
+  })
 })

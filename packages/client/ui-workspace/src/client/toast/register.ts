@@ -13,7 +13,7 @@ import { ArchiveToastEntry, ToastEntry, WorkspaceToast } from './Toast.tsx'
 export function registerToasts(
   ctx: Context,
   viewStore: WorkspaceViewStoreHandle,
-  actions: Pick<RowToastActions, 'undoArchive' | 'showArchived' | 'openForkSource'>,
+  actions: Pick<RowToastActions, 'undoArchive' | 'showArchived' | 'openForkSource' | 'undoDelete'>,
 ): void {
   const archiveFilterAction: ArchiveToastInjected['filterAction'] = (t, dismiss) => ({
     prefix: t('toast.archivedOr'), label: t('toast.archivedFilter'),
@@ -65,6 +65,27 @@ export function registerToasts(
         }),
       }),
     }, ToastEntry<PropsRuntime<'workspace.toast', 'shortcutForkFailed'>>)
+    yield ctx.slots.register({
+      name: 'workspace.toast', key: 'sessionDeleted', locale: 'workspace',
+      inject: (): ToastDisplayInjected<'sessionDeleted'> => ({
+        display: (notice, t, dismiss) => ({
+          text: t('toast.sessionDeleted'), tone: 'success', holdMs: 8000,
+          actions: [{ label: t('toast.sessionDeletedUndo'), onClick: () => { dismiss(); actions.undoDelete(notice.sessionId) } }],
+        }),
+      }),
+    }, ToastEntry<PropsRuntime<'workspace.toast', 'sessionDeleted'>>)
+    yield ctx.slots.register({
+      name: 'workspace.toast', key: 'sessionDeleteLive', locale: 'workspace',
+      inject: (): ToastDisplayInjected<'sessionDeleteLive'> => ({
+        display: (_notice, t) => ({ text: t('toast.sessionDeleteLive'), tone: 'warning', holdMs: 6000 }),
+      }),
+    }, ToastEntry<PropsRuntime<'workspace.toast', 'sessionDeleteLive'>>)
+    yield ctx.slots.register({
+      name: 'workspace.toast', key: 'sessionDeleteFailed', locale: 'workspace',
+      inject: (): ToastDisplayInjected<'sessionDeleteFailed'> => ({
+        display: (_notice, t) => ({ text: t('toast.sessionDeleteFailed'), tone: 'warning', holdMs: 6000 }),
+      }),
+    }, ToastEntry<PropsRuntime<'workspace.toast', 'sessionDeleteFailed'>>)
     yield ctx.slots.register({
       name: 'workspace.toast', key: 'createFailed', locale: 'workspace',
       inject: (): ToastDisplayInjected<'createFailed'> => ({

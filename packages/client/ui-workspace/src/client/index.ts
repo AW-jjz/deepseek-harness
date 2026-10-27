@@ -38,7 +38,8 @@ import type {} from '@deepseek-ai/dsh-client-ui-layout/client'
 // Type-only: pulls the Session root standard-hook merge.
 import type {} from '@deepseek-ai/dsh-client-ui-session/client'
 import {
-  type ArchiveSessionInjected, type ForkSessionInjected, menuOpenStateFactory, type PinSessionInjected,
+  type ArchiveSessionInjected, type DeleteSessionInjected, type ForkSessionInjected, menuOpenStateFactory,
+  type PinSessionInjected,
   type SessionArchiveConfirmInjected, type SessionArchiveConfirmRequest,
   type RenameSessionInjected, type RowToast, type RowToastInjected, type RowToastState, type SessionRenameDialogInjected,
   type SessionIdInjected, type WorkspaceBrowserInjected, type WorkspacePickerInjected,
@@ -48,6 +49,7 @@ import { UiWorkspaceService } from './navigation.ts'
 import { createWorkspaceViewStore } from './stores.ts'
 import { WorkspaceBrowser } from './rows/WorkspaceBrowser.tsx'
 import { ArchiveSessionMenuItem, ArchiveSessionRowButton, SessionArchiveConfirmDialog } from './session-actions/ArchiveSession.tsx'
+import { DeleteSessionMenuItem } from './session-actions/DeleteSession.tsx'
 import { derive } from './session-actions/derived.ts'
 import { ForkSessionMenuItem } from './session-actions/ForkSession.tsx'
 import { PinSessionMenuItem, PinSessionRowButton } from './session-actions/PinSession.tsx'
@@ -211,6 +213,35 @@ export function apply(ctx: Context): void {
     },
     unarchiveSession,
   })
+  // A Session with a running Turn cannot be removed: its Agent is still
+  // appending to the log. The row hides the action instead of offering a
+  // refusal. An idle-but-loaded Agent still refuses at the Host, which the
+  // notice explains, so the menu is never the only guard.
+  const runningSet = derive(sessions.list, snapshot => new Set<SessionId>(
+    snapshot.ids.filter(id => snapshot.byId[id]?.running === true),
+  ))
+  const undoDelete = (sessionId: SessionId): void => {
+    void ctx.remote.session.restore({ sessionId }).then(async (result) => {
+      if (!result.ok) {
+        notify({ kind: 'sessionDeleteFailed' })
+        return
+      }
+      await sessions.refresh()
+    }).catch(() => { notify({ kind: 'sessionDeleteFailed' }) })
+  }
+  const deleteInjected = (): DeleteSessionInjected => ({
+    hooks: { live: runningSet, archived: archivedSet },
+    deleteSession: (sessionId) => {
+      void ctx.remote.session.delete({ sessionId }).then(async (result) => {
+        if (result.ok) {
+          notify({ kind: 'sessionDeleted', sessionId })
+          await sessions.refresh()
+          return
+        }
+        notify({ kind: result.error.code === 'session/agent-busy' ? 'sessionDeleteLive' : 'sessionDeleteFailed' })
+      }).catch(() => { notify({ kind: 'sessionDeleteFailed' }) })
+    },
+  })
   installWorkspaceShortcuts(ctx, uiWorkspace, shortcutControls, archiveInjected().archiveSession,
     (reason) => { notify({ kind: 'shortcutForkFailed', reason }) })
   const archiveConfirmInjected = (): SessionArchiveConfirmInjected => ({
@@ -247,6 +278,7 @@ export function apply(ctx: Context): void {
   })
   const toastActions = {
     undoArchive: unarchiveSession,
+    undoDelete,
     showArchived: () => { viewInstance.actions.setArchivedFilter('show') },
     openForkSource: (sessionId: SessionId) => {
       if (workspaces.list.getSnapshot().archivedSessionIds.includes(sessionId)) {
@@ -320,6 +352,7 @@ export function apply(ctx: Context): void {
     yield ctx.slots.register({ name: 'sidebar.workspaces.session.menu.item', id: 'fork', order: 300, locale: NS, inject: forkInjected }, ForkSessionMenuItem)
     yield ctx.slots.register({ name: 'sidebar.workspaces.session.menu.item', id: 'archive', order: 400, locale: NS, inject: archiveInjected }, ArchiveSessionMenuItem)
     yield ctx.slots.register({ name: 'sidebar.workspaces.session.menu.item', id: 'session-id', order: 450, locale: NS, inject: sessionIdInjected }, SessionIdMenuItem)
+    yield ctx.slots.register({ name: 'sidebar.workspaces.session.menu.item', id: 'delete', order: 480, locale: NS, inject: deleteInjected }, DeleteSessionMenuItem)
   })
   ctx.slots.inject('sidebar.workspaces.session.row.action', function* () {
     yield ctx.slots.register({ name: 'sidebar.workspaces.session.row.action', id: 'archive', order: 100, locale: NS, inject: archiveInjected }, ArchiveSessionRowButton)

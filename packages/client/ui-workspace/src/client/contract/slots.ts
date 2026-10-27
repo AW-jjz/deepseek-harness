@@ -323,6 +323,12 @@ export type RowToast =
    * a report can be searched by it — and any other failure's own message.
    */
   | { kind: 'createFailed'; message: string }
+  /** A Session left the store; the notice offers to put it back. */
+  | { kind: 'sessionDeleted'; sessionId: SessionId }
+  /** The Host refused removal because the Session is still open in this window. */
+  | { kind: 'sessionDeleteLive' }
+  /** Removal failed for any other reason; the Session is unchanged. */
+  | { kind: 'sessionDeleteFailed' }
 
 /** The notice on display; `seq` keys remounts so a repeated notice restarts its hold. */
 export type RowToastState = RowToast & { seq: number }
@@ -344,6 +350,22 @@ export interface PinSessionInjected {
   pinSession: (sessionId: SessionId) => void
   /** Unpin a Session; saved positions stay as they are. */
   unpinSession: (sessionId: SessionId) => void
+}
+
+/**
+ * Delete action share (menu row). The callbacks carry the whole behavior: the
+ * Host call, the notice a success raises with its undo, the notice for a
+ * Session still open in this window, and the failure notice.
+ */
+export interface DeleteSessionInjected {
+  hooks: {
+    /** Session ids whose Agent is live in this window; their removal is refused. */
+    live: HostObservable<ReadonlySet<SessionId>>
+    /** Archived Session ids, which keep the history they were archived from. */
+    archived: HostObservable<ReadonlySet<SessionId>>
+  }
+  /** Remove one Session into the store's recovery copy. */
+  deleteSession: (sessionId: SessionId) => void
 }
 
 /**
@@ -453,6 +475,8 @@ export interface RowToastInjected {
 export interface RowToastActions {
   /** Undo an archive from its notice. */
   undoArchive: (sessionId: SessionId) => void
+  /** Put a removed Session back from its notice. */
+  undoDelete: (sessionId: SessionId) => void
   /** Switch the archived filter to "show" so the archived row is back in view. */
   showArchived: () => void
   /** Open the fork source without retrying the fork. */
