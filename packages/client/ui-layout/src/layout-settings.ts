@@ -42,3 +42,16 @@ export const LayoutSettingsFields = {
 
 /** Schema for the shared layout preferences. */
 export const LayoutSettingsSchema = z.object(LayoutSettingsFields)
+
+/**
+ * Runtime preferences projected to the browser.
+ *
+ * Only volatile fields reach `settings/describe`, which is the mirror the
+ * browser writes through: an ordinary config field would stay host-only and the
+ * frame would have nowhere to store its widths.
+ */
+export const Config = z.object({
+  [LAYOUT_SETTINGS_FIELDS.sidebarWidth]: LayoutSettingsFields[LAYOUT_SETTINGS_FIELDS.sidebarWidth].volatile(),
+  [LAYOUT_SETTINGS_FIELDS.rightPanelWidth]: LayoutSettingsFields[LAYOUT_SETTINGS_FIELDS.rightPanelWidth].volatile(),
+  [LAYOUT_SETTINGS_FIELDS.activePanelId]: LayoutSettingsFields[LAYOUT_SETTINGS_FIELDS.activePanelId].volatile(),
+})

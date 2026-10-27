@@ -177,7 +177,8 @@ describe('node half', () => {
       nodeApply(ctx)
       // The schema is what publishes the `ui-layout` settings namespace; without
       // it the browser has nowhere to store a width.
-      expect(Object.keys(nodeConfig)).toEqual(['sidebarWidth', 'rightPanelWidth', 'activePanelId'])
+      expect(nodeConfig.meta.volatile).not.toBe(true)
+      expect(Object.keys(nodeConfig.dict ?? {})).toEqual(['sidebarWidth', 'rightPanelWidth', 'activePanelId'])
     } finally { void ctx.fiber.dispose() }
   })
 })
