@@ -69,7 +69,8 @@ describe('Desktop Host update task control', () => {
     vi.useFakeTimers()
     try {
       const hanging = new Promise<never>(() => {})
-      const response = { writeHead: vi.fn(), end: vi.fn() } as unknown as ServerResponse
+      // Only the two members the drain path touches; the rest of the interface never runs.
+      const response = { writeHead: vi.fn(), end: vi.fn() } as Partial<ServerResponse> as ServerResponse
       // Admit one request that never finishes; the lock must stop waiting at its budget.
       ctx.emit('connection/request', {} as IncomingMessage, response, () => hanging)
       const locking = expect(control('lock')).rejects.toThrow(/did not finish draining/u)
@@ -89,7 +90,8 @@ describe('Desktop Host update task control', () => {
     try {
       expect(await control('lock')).toBe(false)
       await vi.advanceTimersByTimeAsync(LOCK_STALE_MS)
-      const response = { writeHead: vi.fn(), end: vi.fn() } as unknown as ServerResponse
+      // Only the two members the drain path touches; the rest of the interface never runs.
+      const response = { writeHead: vi.fn(), end: vi.fn() } as Partial<ServerResponse> as ServerResponse
       ctx.emit('connection/request', {} as IncomingMessage, response, () => Promise.resolve())
       expect(response.writeHead).not.toHaveBeenCalledWith(503)
     } finally {

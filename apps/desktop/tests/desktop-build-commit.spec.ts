@@ -63,7 +63,7 @@ describe('desktop build provenance gate', () => {
       .toThrow(/uncommitted changes/u)
     // Accepted with the explicit override; the Electron check still runs and passes here.
     expect(assertDesktopBuildProvenance(REPOSITORY_ROOT, APP_ROOT, { commit: head, dirty: true },
-      { [DESKTOP_ALLOW_DIRTY_BUILD_ENV]: '1' })).toEqual({ commit: head, dirty: true, electron: expect.stringMatching(/^\d+\.\d+\.\d+/u) as unknown as string })
+      { [DESKTOP_ALLOW_DIRTY_BUILD_ENV]: '1' })).toEqual({ commit: head, dirty: true, electron: expect.stringMatching(/^\d+\.\d+\.\d+/u) as string })
   })
 
   it('rejects an installed Electron that differs from the declared version', async () => {

@@ -420,6 +420,19 @@ abstract stat(id: SessionId, options?: SessionPersistenceStatOptions): Promise<S
  * @returns one snapshot per stored session.
  */
 abstract list(options?: SessionPersistenceListOptions): Promise<readonly SessionPersistenceSnapshot[]>
+
+/**
+ * Free bytes the backing store can still accept, or `undefined` when this
+ * backend does not report free space.
+ *
+ * Backends that can answer implement it so the Agent loop can refuse a Turn
+ * the store could not record (see {@link storageAdmission} and
+ * {@link StorageFullError}) instead of failing halfway through one. The read
+ * must stay cheap and side-effect free: it runs once per Turn and must never
+ * create or repair storage to answer.
+ * @returns free bytes available to this process, or `undefined` when unknown.
+ */
+availableBytes?(): Promise<number | undefined>
 ```
 
 Types: [SessionId](core.md)

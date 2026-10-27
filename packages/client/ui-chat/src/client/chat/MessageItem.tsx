@@ -58,6 +58,7 @@ function failureMessage(
   if (code === 'INTERRUPTED') return t('message.failure.interrupted')
   if (code === 'ACCOUNT_SIGN_IN_REQUIRED') return t('message.failure.accountSignInRequired')
   if (code === 'QUOTA' || code === 'ACCOUNT_QUOTA') return t('message.failure.quota')
+  if (code === 'STORAGE_FULL') return t('message.failure.storageFull')
   return code === 'AUTH' ? t('message.failure.auth') : message
 }
 
@@ -79,6 +80,9 @@ export function turnErrorAction(code: string | undefined, t: ChatViewSlotProps['
   }
   if (code === 'QUOTA' || code === 'ACCOUNT_QUOTA') {
     return { label: t('message.failureAction.account'), command: 'settings.open' as ShortcutCommandId }
+  }
+  if (code === 'STORAGE_FULL') {
+    return { label: t('message.failureAction.storage'), command: 'storage.reveal' as ShortcutCommandId }
   }
   return undefined
 }

@@ -10,6 +10,7 @@ import { LocaleRuntime } from '@deepseek-ai/dsh-client-locale/client'
 import { resolveSlotLabel } from '@deepseek-ai/dsh-client-ui-slots'
 import type { ObservableSnapshot } from '@deepseek-ai/dsh-client-store'
 import type { SessionBinding } from '@deepseek-ai/dsh-api-session-controller/client'
+import type { ShortcutCommand } from '@deepseek-ai/dsh-client-shortcuts/client'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { WorkspaceId } from '@deepseek-ai/dsh-workspace/types'
 import {
@@ -42,7 +43,12 @@ usePinnedBrowserLanguages('zh-CN')
 
 const SID = 'session-1' as SessionId
 
-async function bench() {
+interface BenchOptions {
+  /** Provide the shared command registry so Chat's own commands register. */
+  shortcuts?: boolean
+}
+
+async function bench(options: BenchOptions = {}) {
   const runtime = await SlotTestRuntime.create()
   runtime.ctx.provide('fileDrag', { actions: { prepare: async () => ({ start: () => true, release: () => {} }), reportFailure: () => {} }, read: () => undefined } satisfies import('@deepseek-ai/cordis').Context['fileDrag'])
   const chatSettings = stubConfigForm<ChatSettings>()
@@ -69,9 +75,23 @@ async function bench() {
     }),
     openSession,
   } as never)
+  const revealSessionStore = vi.fn(async () => ({ ok: true, value: { opened: true, path: '/store/sessions' } }))
   runtime.remote.provideNamespaces({
-    session: { openWorkspacePath: vi.fn(async () => ({ ok: true, value: { opened: true } })) },
+    session: {
+      openWorkspacePath: vi.fn(async () => ({ ok: true, value: { opened: true } })),
+      revealSessionStore,
+    },
   })
+  const commands: ShortcutCommand[] = []
+  if (options.shortcuts === true) {
+    runtime.ctx.provide('shortcuts', {
+      register: (command: ShortcutCommand) => {
+        commands.push(command)
+        return () => {}
+      },
+      invoke: vi.fn(),
+    } as never)
+  }
   const locale = new LocaleRuntime(runtime.ctx)
   runtime.ctx.provide('locale', locale)
   runtime.slots.installLocale(locale)
@@ -89,7 +109,7 @@ async function bench() {
   const chat = await runtime.mount({ inject: [...injectChat], apply: applyChat })
   const sourceDescriptor = provide.mock.calls[0]?.[0]
   if (sourceDescriptor === undefined) throw new Error('ui-chat did not provide its standard source')
-  return { runtime, conversation, chat, chatSettings, sourceDescriptor }
+  return { runtime, conversation, chat, chatSettings, sourceDescriptor, revealSessionStore, commands }
 }
 
 function storeOf(runtime: SlotTestRuntime, key: 'conversation.session' | 'conversation.session.header' | 'conversation.view') {
@@ -125,6 +145,22 @@ describe('Chat apply wiring', () => {
       const row = b.runtime.slots.entries('conversation.chat.node').find(entry => entry.options.key === 'turn-error')!
       expect(row.inject).toBeUndefined()
       expect(row.children).toBeUndefined()
+    } finally {
+      await b.runtime.dispose()
+    }
+  })
+
+  it('registers the storage action that reveals the Host store', async () => {
+    const b = await bench({ shortcuts: true })
+    try {
+      const command = b.commands.find(entry => entry.id === 'storage.reveal')
+      expect(command).toBeDefined()
+      const resolution = command!.resolve({ region: 'page', modal: null, target: null })
+      expect(resolution.status).toBe('handled')
+      if (resolution.status !== 'handled') throw new Error('unreachable')
+      resolution.run()
+      await Promise.resolve()
+      expect(b.revealSessionStore).toHaveBeenCalledOnce()
     } finally {
       await b.runtime.dispose()
     }

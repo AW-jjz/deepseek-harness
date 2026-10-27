@@ -7,7 +7,7 @@ import type {} from '@deepseek-ai/dsh-api-remotes/client'
 import type { SessionBinding } from '@deepseek-ai/dsh-api-session-controller/client'
 import type { GroupKey } from '@deepseek-ai/dsh-client-ui-conversation/client'
 import { createSnapshotStore, type ObservableSnapshot } from '@deepseek-ai/dsh-client-store'
-import type { Shortcuts } from '@deepseek-ai/dsh-client-shortcuts/client'
+import type { ShortcutCommandId, Shortcuts } from '@deepseek-ai/dsh-client-shortcuts/client'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type {} from '@deepseek-ai/dsh-client-ui-sidebar-right/client'
 import type {} from '@deepseek-ai/dsh-client-ui-sidebar-browser/client'
@@ -213,6 +213,23 @@ export function apply(ctx: Context): void {
   const shortcuts = ctx.get('shortcuts')
   const invokeCommand = (id: Parameters<Shortcuts['invoke']>[0]): void => {
     shortcuts?.invoke(id, { region: 'page', modal: null, target: null })
+  }
+  if (shortcuts !== undefined) {
+    // The storage failure row's action. Revealing the store is a Host gesture, so a
+    // deployment that cannot open a file manager answers with the path and nothing
+    // happens here; the row's copy still says what to clear.
+    ctx.effect(() => shortcuts.register({
+      id: 'storage.reveal' as ShortcutCommandId,
+      label: () => t('message.failureAction.storage'),
+      aliases: ['storage', 'data folder'],
+      defaults: {},
+      regions: ['page', 'editable', 'terminal'],
+      modals: [],
+      resolve: () => ({
+        status: 'handled',
+        run: () => { void ctx.remote.session.revealSessionStore().catch(() => undefined) },
+      }),
+    }))
   }
   const nodeSources = (binding: SessionBinding): Pick<ChatViewInjected, 'keyedHooks'> => {
     const chat = chatSource(binding)

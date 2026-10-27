@@ -32,6 +32,13 @@ import type { Scope } from '@deepseek-ai/dsh-scope'
 import { createScope } from '@deepseek-ai/dsh-scope'
 import type { EpochHeader, RequestContext, Session, SessionId, SessionSeq, TurnEndReason, UserMessage } from '@deepseek-ai/dsh-session'
 import { canonicalHeader, headerEquals, ToolCallRecovery } from '@deepseek-ai/dsh-session'
+import {
+  STORAGE_BLOCK_BYTES,
+  STORAGE_FULL_CODE,
+  StorageFullError,
+  storageAdmission,
+  storageExhaustion,
+} from '@deepseek-ai/dsh-session-persistence'
 import { joinContextSections, renderContextSections, renderPrompt } from '@deepseek-ai/dsh-system-prompt'
 import type { PromptAssembly } from '@deepseek-ai/dsh-system-prompt'
 import { ToolActivationError, ToolBatchExecutionError } from '@deepseek-ai/dsh-tools'
@@ -73,6 +80,37 @@ function requestProposal(header: EpochHeader): LlmCallConfig {
   if (header.adapterDefaults.reasoningEffort === true) delete proposal.reasoningEffort
   if (header.adapterDefaults.maxTokens === true) delete proposal.maxTokens
   return proposal
+}
+
+/** Last low-space warning this process emitted; the condition persists across every Turn. */
+let lowStorageWarnedAt = 0
+
+/**
+ * The stable code recorded for a non-`LlmError` Turn failure.
+ * @param error - the thrown failure, possibly wrapped by a durable write.
+ * @returns the code consumers route on; `UNKNOWN` when no known code applies.
+ */
+export function failureCode(error: unknown): string {
+  if (error instanceof StorageFullError) return STORAGE_FULL_CODE
+  if (error instanceof ToolActivationError) return error.code
+  return storageExhaustion(error) === undefined ? 'UNKNOWN' : STORAGE_FULL_CODE
+}
+
+/**
+ * Warn once an hour while the session store is low, not once per Turn: the
+ * condition is a property of the volume, and every live Agent would otherwise
+ * repeat it on each Turn it admits.
+ * @param ctx - the checking Agent's context, used for its logger.
+ * @param freeBytes - the low reading that admitted this Turn.
+ */
+function warnLowStorage(ctx: Context, freeBytes: number): void {
+  const now = Date.now()
+  if (now - lowStorageWarnedAt < 60 * 60 * 1_000) return
+  lowStorageWarnedAt = now
+  ctx.logger('agent-loop').warn(
+    `session store is low on space: ${Math.round(freeBytes / (1024 * 1024))} MB free; `
+    + `Turns are refused below ${Math.round(STORAGE_BLOCK_BYTES / (1024 * 1024))} MB`,
+  )
 }
 
 /**
@@ -258,6 +296,27 @@ export class ReactLoopAgent implements Agent {
     throw error
   }
 
+  /**
+   * Refuse a Turn the session store could not record, and warn while space is low.
+   *
+   * The check is advisory and never fatal on its own: a backend that cannot
+   * report free space, or throws while trying, admits the Turn and leaves the
+   * write path to classify a real `ENOSPC`. Only a reading below the write
+   * margin refuses — at that point the Turn's own failure record would not fit.
+   */
+  private async assertStorageAdmitsTurn(readFreeBytes: () => Promise<number | undefined>): Promise<void> {
+    let freeBytes: number | undefined
+    try {
+      freeBytes = await readFreeBytes()
+    } catch (error: unknown) {
+      this.ctx.logger('agent-loop').warn(`storage free-space check failed: ${errorChain(error)}`)
+      return
+    }
+    const admission = storageAdmission(freeBytes)
+    if (admission.level === 'full') throw new StorageFullError(admission.freeBytes)
+    if (admission.level === 'warning') warnLowStorage(this.ctx, admission.freeBytes)
+  }
+
   private async kick(): Promise<void> {
     try {
       while (await this.turn()) {}
@@ -334,6 +393,12 @@ export class ReactLoopAgent implements Agent {
     let turnEnds: TurnEndReason | null = null
     let target: InboxTarget = 'next-turn'
     try {
+      // A Turn that cannot be recorded is refused before it spends a model call
+      // and before its failure would itself fail to append. A deployment with no
+      // reporting backend keeps the driver's fully synchronous start.
+      const persistence = this.ctx.get('sessionPersistence')
+      const readFreeBytes = persistence?.availableBytes?.bind(persistence)
+      if (readFreeBytes !== undefined) await this.assertStorageAdmitsTurn(readFreeBytes)
       while (true) {
         signal.throwIfAborted()
         const step = phase.step + 1
@@ -400,13 +465,15 @@ export class ReactLoopAgent implements Agent {
         throw error
       }
       // Every failure is structured: an `LlmError` keeps its facts, a tool
-      // activation failure keeps its code, and anything else flattens to
-      // `errorChain` text under the `UNKNOWN` code.
+      // activation or storage failure keeps its code, and anything else
+      // flattens to `errorChain` text under the `UNKNOWN` code. Storage
+      // exhaustion is named even when it arrives wrapped from a durable write,
+      // so the row says "full" instead of offering nothing to act on.
       turnEnds = {
         kind: 'error',
         error: error instanceof LlmError
           ? error.failure
-          : { message: errorChain(error), code: error instanceof ToolActivationError ? error.code : 'UNKNOWN' },
+          : { message: errorChain(error), code: failureCode(error) },
       }
       this.throwError(error)
     } finally {

@@ -14,7 +14,7 @@ import {
   sessionFormatCatalog,
 } from '@deepseek-ai/dsh-session-format-catalog'
 import { readdirSync, type Dirent } from 'node:fs'
-import { open, mkdir, readdir, realpath, link, rm, stat, truncate } from 'node:fs/promises'
+import { open, mkdir, readdir, realpath, link, rm, stat, statfs, truncate } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 import { performance } from 'node:perf_hooks'
 import { scheduler } from 'node:timers/promises'
@@ -292,7 +292,8 @@ class JsonlSessionPersistence extends SessionPersistence {
   /** Backend label for diagnostics and effects; shadows `Service.name` without changing the service key. */
   override readonly name = 'session-persistence-jsonl'
 
-  private root: string
+  /** Resolved session root; also the service definition's `root`, so host actions can reveal it. */
+  override readonly root: string
   private compression: JsonlCompression
   /**
    * Bounds directory, header, and stat I/O across every concurrent listing of
@@ -347,6 +348,25 @@ class JsonlSessionPersistence extends SessionPersistence {
   }
 
   // --- SessionPersistence service API ---
+
+  /**
+   * Report the free bytes left on the volume holding the session root.
+   *
+   * `bavail` is the unprivileged view, matching what the app can actually use,
+   * and the root is used rather than the process cwd so a profile on another
+   * volume reports that volume. An absent root, or a platform whose `statfs`
+   * fails, answers `undefined`: admission then proceeds and the write path
+   * still classifies a real `ENOSPC`.
+   * @returns free bytes, or `undefined` when this host cannot report them.
+   */
+  override async availableBytes(): Promise<number | undefined> {
+    try {
+      const filesystem = await statfs(this.root)
+      return filesystem.bavail * filesystem.bsize
+    } catch {
+      return undefined
+    }
+  }
 
   /**
    * Create a new stored session and take its write ownership. The session is

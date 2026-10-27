@@ -905,6 +905,19 @@ workspaceDesktop(): { name: string; available: boolean; fileManager: 'finder' | 
 @Remote('openWorkspacePath') async openWorkspacePath( request: SessionOpenWorkspacePathRequest, signal: AbortSignal, ): Promise<SessionOpenWorkspacePathValue>
 
 /**
+ * Reveal the backend's session store directory in the serving desktop's file manager.
+ *
+ * The store root is Host-owned and never a browser-supplied path, so this
+ * bypasses the composed-filesystem check `openWorkspacePath` applies to
+ * Session content. A deployment with no native opener answers with the path
+ * and `opened: false` so the caller can show the location instead.
+ * @param signal - caller lifetime; abort terminates the native command.
+ * @returns whether a desktop opened the directory, and its absolute path.
+ * @throws RemoteError when the store has no directory or the opener fails.
+ */
+@Remote async revealSessionStore(signal: AbortSignal): Promise<SessionStoreRevealValue>
+
+/**
  * Query current file handlers on the serving desktop without activating an Agent.
  * @param request - file path in Host filesystem syntax.
  * @param signal - caller lifetime, propagated to filesystem and desktop queries.

@@ -36,6 +36,15 @@ export {
 } from './errors.ts'
 export type { SessionLocation } from './errors.ts'
 export {
+  STORAGE_BLOCK_BYTES,
+  STORAGE_FULL_CODE,
+  STORAGE_WARN_BYTES,
+  StorageFullError,
+  storageAdmission,
+  storageExhaustion,
+} from './storage-space.ts'
+export type { StorageAdmission } from './storage-space.ts'
+export {
   assertContiguous,
   assertStoredId,
   assertVersion,
@@ -145,6 +154,13 @@ export abstract class SessionPersistence extends Service {
   /** Process-local instance identity, stable through Context proxies and distinct after service replacement. */
   readonly identity: symbol = Symbol('sessionPersistence')
 
+  /**
+   * Absolute directory this backend keeps its durable state under, when it has
+   * one. Host actions that reveal or measure storage read this instead of
+   * re-deriving whichever root the composition configured.
+   */
+  readonly root?: string
+
   constructor(ctx: Context) {
     super(ctx, 'sessionPersistence')
   }
@@ -208,6 +224,19 @@ export abstract class SessionPersistence extends Service {
    * @returns one snapshot per stored session.
    */
   abstract list(options?: SessionPersistenceListOptions): Promise<readonly SessionPersistenceSnapshot[]>
+
+  /**
+   * Free bytes the backing store can still accept, or `undefined` when this
+   * backend does not report free space.
+   *
+   * Backends that can answer implement it so the Agent loop can refuse a Turn
+   * the store could not record (see {@link storageAdmission} and
+   * {@link StorageFullError}) instead of failing halfway through one. The read
+   * must stay cheap and side-effect free: it runs once per Turn and must never
+   * create or repair storage to answer.
+   * @returns free bytes available to this process, or `undefined` when unknown.
+   */
+  availableBytes?(): Promise<number | undefined>
 }
 
 export default SessionPersistence

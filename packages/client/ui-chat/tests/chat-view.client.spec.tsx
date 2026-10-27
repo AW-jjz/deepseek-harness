@@ -2480,7 +2480,7 @@ describe('ChatView', () => {
   it('renders every terminal failure inline with neutral quota copy and no transient notice', () => {
     const h = makeHarness({ nodes: [
       user(1, 'try'), turnError(2, 'AUTH'), turnError(3), turnError(4, 'QUOTA'), turnError(5, 'ACCOUNT_QUOTA'),
-      turnError(6, 'INTERRUPTED'),
+      turnError(6, 'INTERRUPTED'), turnError(7, 'STORAGE_FULL'),
     ] })
     const view = render(<h.ChatView {...h.props} />)
     const statuses = view.getAllByRole('status')
@@ -2492,6 +2492,7 @@ describe('ChatView', () => {
       '本轮运行失败当前请求的额度已用尽管理账户与密钥QUOTA',
       '本轮运行失败当前请求的额度已用尽管理账户与密钥ACCOUNT_QUOTA',
       '任务已停止DSH 进程在本轮完成前退出（例如被强制结束、崩溃或关闭超时），重新启动后本轮已中止。未完成的工具调用结果未知。',
+      '本轮运行失败磁盘空间不足，本轮无法保存。打开数据文件夹STORAGE_FULL',
     ])
     // The transient notice is the frame-wide host's job; the failure row keeps
     // neither a recharge affordance nor a toast of its own.
@@ -2502,11 +2503,14 @@ describe('ChatView', () => {
     // and unknown-code rows render no button at all.
     const buttons = statuses.map(status => [...status.querySelectorAll('button')].map(button => button.textContent))
     expect(buttons).toEqual([
-      ['管理账户与密钥'], [], ['管理账户与密钥'], ['管理账户与密钥'], [],
+      ['管理账户与密钥'], [], ['管理账户与密钥'], ['管理账户与密钥'], [], ['打开数据文件夹'],
     ])
     const invokeCommand = h.props.invokeCommand as ReturnType<typeof vi.fn>
     fireEvent.click(statuses[0]!.querySelector('button')!)
     expect(invokeCommand).toHaveBeenCalledExactlyOnceWith('settings.open')
+    // A full store offers the one gesture that helps: revealing the folder to clear.
+    fireEvent.click(statuses[5]!.querySelector('button')!)
+    expect(invokeCommand).toHaveBeenLastCalledWith('storage.reveal')
   })
 
   it('renders the max-tokens notice with localized guidance, distinct from turn errors', () => {

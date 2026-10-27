@@ -56,6 +56,7 @@ import type {
   SessionRenameValue,
   SessionSearchRequest,
   SessionSearchValue,
+  SessionStoreRevealValue,
   SessionSelectModelRequest,
   SessionSelectModelValue,
   SessionProjectionsRequest,
@@ -374,6 +375,32 @@ export class SessionController extends TypertRemoteService {
         {},
         { cause: error },
       )
+    }
+  }
+
+  /**
+   * Reveal the backend's session store directory in the serving desktop's file manager.
+   *
+   * The store root is Host-owned and never a browser-supplied path, so this
+   * bypasses the composed-filesystem check `openWorkspacePath` applies to
+   * Session content. A deployment with no native opener answers with the path
+   * and `opened: false` so the caller can show the location instead.
+   * @param signal - caller lifetime; abort terminates the native command.
+   * @returns whether a desktop opened the directory, and its absolute path.
+   * @throws RemoteError when the store has no directory or the opener fails.
+   */
+  @Remote
+  async revealSessionStore(signal: AbortSignal): Promise<SessionStoreRevealValue> {
+    const path = this.ctx.get('sessionPersistence')?.root
+    if (path === undefined) throw new RemoteError('session/store-unavailable', 'this deployment stores no sessions here', {})
+    if (!this.canOpenPath()) return { opened: false, path }
+    try {
+      await this.revealPath(path, signal)
+      return { opened: true, path }
+    } catch (error: unknown) {
+      if (signal.aborted) throw new RemoteError('gateway/cancelled', 'store reveal was aborted', {})
+      if (error instanceof RemoteError) throw error
+      throw new RemoteError('gateway/internal', 'store reveal failed', {}, { cause: error })
     }
   }
 

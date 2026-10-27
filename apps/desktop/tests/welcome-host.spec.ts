@@ -35,7 +35,7 @@ describe('desktop welcome Web operations', () => {
   it('authenticates through Web and stores only through the configured credential reference', async () => {
     const host = transport()
     const backend = await connectDesktopWelcome(url, host.send)
-    expect(host.send).toHaveBeenCalledExactlyOnceWith(url, { credentials: 'include', signal: expect.any(AbortSignal) as unknown as AbortSignal })
+    expect(host.send).toHaveBeenCalledExactlyOnceWith(url, { credentials: 'include', signal: expect.any(AbortSignal) as AbortSignal })
     expect(await backend.analyticsEnabled()).toBe(true)
     expect(await backend.save('sk-example')).toEqual({ ok: true })
     expect(host.keys.get('CUSTOM_DEEPSEEK_KEY')).toBe('sk-example')

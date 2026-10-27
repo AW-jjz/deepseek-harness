@@ -198,6 +198,7 @@ declare module '@deepseek-ai/dsh-typert-protocol' {
     'session/title-invalid': { readonly sessionId: SessionId }
     'session/fork-unavailable': { readonly sessionId: SessionId }
     'session/migration-required': { readonly sessionId: SessionId }
+    'session/store-unavailable': Record<string, never>
     'subagent/not-found': {
       readonly parentSessionId: SessionId
       readonly childSessionId: SessionId
@@ -374,6 +375,14 @@ export interface SessionOpenWorkspacePathRequest {
 /** Confirmation that the Host handed a workspace path to its native opener. */
 export interface SessionOpenWorkspacePathValue {
   readonly opened: true
+}
+
+/** Outcome of revealing the session store: whether a desktop accepted it, and the path either way. */
+export interface SessionStoreRevealValue {
+  /** True once the serving desktop opened its file manager on the store. */
+  readonly opened: boolean
+  /** Absolute store directory, for a caller that must show the location instead of opening it. */
+  readonly path?: string
 }
 
 /** Client-minted prompt identity used to reconcile optimistic and durable messages. */

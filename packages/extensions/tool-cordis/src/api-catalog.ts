@@ -2318,6 +2318,13 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         throws: ['RemoteError when the request is invalid, has no verified Host mapping, is cancelled, or the opener fails.'],
       },
       {
+        signature: '@Remote async revealSessionStore(signal: AbortSignal): Promise<SessionStoreRevealValue>',
+        description: 'Reveal the backend\'s session store directory in the serving desktop\'s file manager.\n\nThe store root is Host-owned and never a browser-supplied path, so this bypasses the composed-filesystem check `openWorkspacePath` applies to Session content. A deployment with no native opener answers with the path and `opened: false` so the caller can show the location instead.',
+        parameters: [{ name: 'signal', description: 'caller lifetime; abort terminates the native command.' }],
+        returns: 'whether a desktop opened the directory, and its absolute path.',
+        throws: ['RemoteError when the store has no directory or the opener fails.'],
+      },
+      {
         signature: '@Remote(\'workspacePathApplications\') async workspacePathApplications( request: { readonly path: string }, signal: AbortSignal, ): Promise<readonly SessionWorkspacePathApplication[]>',
         description: 'Query current file handlers on the serving desktop without activating an Agent.',
         parameters: [{ name: 'request', description: 'file path in Host filesystem syntax.' }, { name: 'signal', description: 'caller lifetime, propagated to filesystem and desktop queries.' }],
@@ -2423,6 +2430,11 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         parameters: [],
       },
       {
+        signature: 'readonly root?: string',
+        description: 'Absolute directory this backend keeps its durable state under, when it has one. Host actions that reveal or measure storage read this instead of re-deriving whichever root the composition configured.',
+        parameters: [],
+      },
+      {
         signature: 'abstract create(header: SessionHeader, options?: SessionPersistenceCreateOptions): Promise<SessionHandle>',
         description: 'Create a new stored session and take its write ownership.',
         parameters: [{ name: 'header', description: 'the immutable header (id, version, cwd, lineage) to store.' }, { name: 'options', description: 'optional cancellation.' }],
@@ -2454,6 +2466,12 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         description: 'List every stored session visible to this process, in no promised order.',
         parameters: [{ name: 'options', description: 'optional cancellation.' }],
         returns: 'one snapshot per stored session.',
+      },
+      {
+        signature: 'availableBytes?(): Promise<number | undefined>',
+        description: 'Free bytes the backing store can still accept, or `undefined` when this backend does not report free space.\n\nBackends that can answer implement it so the Agent loop can refuse a Turn the store could not record (see storageAdmission and StorageFullError) instead of failing halfway through one. The read must stay cheap and side-effect free: it runs once per Turn and must never create or repair storage to answer.',
+        parameters: [],
+        returns: 'free bytes available to this process, or `undefined` when unknown.',
       },
     ],
   },
@@ -7855,6 +7873,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'SessionStorageMetadata',
     declaration: 'export interface SessionStorageMetadata {\n    readonly meta: SessionHeader;\n    readonly inheritedEventCount: SessionLogOffset;\n}',
+  },
+  {
+    name: 'SessionStoreRevealValue',
+    declaration: 'export interface SessionStoreRevealValue {\n    readonly opened: boolean;\n    readonly path?: string;\n}',
   },
   {
     name: 'SessionSummary',
