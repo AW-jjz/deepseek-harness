@@ -59,7 +59,8 @@ import { DesktopMandatoryUpdatePolicy, resolveDesktopPolicyConfig, type DesktopP
 import { desktopClientMetadata, desktopClientVersion } from './client-metadata.ts'
 import { DesktopMandatoryUpdateWindow } from './mandatory-update-window.ts'
 import { DesktopPolicyTestAuth } from './policy-test-auth.ts'
-import { readDesktopSettings, writeStartAtLogin } from './settings.ts'
+import { readDesktopSettings, writeStartAtLogin, writeTaskCompletionNotice } from './settings.ts'
+import { DesktopTaskNotices } from './task-notice.ts'
 import { applyStartAtLogin, launchedHidden, launchOrigin, startAtLoginEnabled } from './login-item.ts'
 import { DesktopUpdateDialog, type UpdateDialogOptions } from './update-dialog.ts'
 import { readDesktopRuntime } from './runtime-tree.ts'
@@ -381,6 +382,25 @@ async function main(): Promise<void> {
   // login item comes back on the next start.
   try { applyStartAtLogin(desktopSettings.launch.startAtLogin) } catch (error) {
     console.warn('desktop login item: unavailable', error)
+  }
+  // The renderer asks for a notification when a turn ends out of sight; the
+  // shell shows it and brings the window back on click.
+  let taskCompletionNotice = desktopSettings.notifications.taskCompletion
+  const taskNotices = new DesktopTaskNotices({
+    enabled: () => taskCompletionNotice,
+    windowInView: () => mainWindow !== undefined && !mainWindow.isDestroyed() && mainWindow.isVisible() && mainWindow.isFocused(),
+    open: (sessionId) => {
+      focusPrimaryWindow()
+      if (mainWindow === undefined || mainWindow.isDestroyed()) return
+      mainWindow.webContents.send(DESKTOP_IPC.taskNoticeOpen, sessionId)
+    },
+  })
+  const toggleTaskCompletionNotice = (): void => {
+    taskCompletionNotice = !taskCompletionNotice
+    void writeTaskCompletionNotice(app.getPath('userData'), taskCompletionNotice).catch((error: unknown) => {
+      console.warn('desktop settings: the task-notification preference was not saved', error)
+    })
+    refreshApplicationMenu()
   }
   const toggleStartAtLogin = (): void => {
     const next = !startAtLoginEnabled()
@@ -875,6 +895,10 @@ async function main(): Promise<void> {
     assertProductSender(event)
     return readDeviceInfo()
   })
+  ipcMain.handle(DESKTOP_IPC.taskNotice, (event, request: unknown) => {
+    assertProductSender(event)
+    return taskNotices.show(request)
+  })
   ipcMain.handle(DESKTOP_IPC.onboardingApiKey, async (event) => {
     assertProductSender(event)
     return (await readWelcomeState()).hasApiKey
@@ -1099,7 +1123,9 @@ async function main(): Promise<void> {
       tray = new DesktopTray({ iconPath: trayIconPath, locale: currentDesktopLocale,
         open: () => { focusPrimaryWindow() }, quit: () => { app.quit() },
         startAtLogin: () => { try { return startAtLoginEnabled() } catch { return false } },
-        toggleStartAtLogin: () => { toggleStartAtLogin() } })
+        toggleStartAtLogin: () => { toggleStartAtLogin() },
+        taskCompletionNotice: () => taskCompletionNotice,
+        toggleTaskCompletionNotice: () => { toggleTaskCompletionNotice() } })
     } catch (error) { console.warn('desktop tray: unavailable', error) }
   }
   const backgroundNotice = process.platform === 'win32'
@@ -1392,6 +1418,7 @@ async function main(): Promise<void> {
     quitConfirmation.dispose()
     backgroundNotice?.dispose()
     tray?.dispose()
+    taskNotices.dispose()
     stopAccount?.()
     if (welcomeWindow !== undefined && !welcomeWindow.isDestroyed()) welcomeWindow.hide()
     if (mainWindow !== undefined && !mainWindow.isDestroyed()) mainWindow.hide()

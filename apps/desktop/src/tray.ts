@@ -16,6 +16,10 @@ export interface DesktopTrayOptions {
   readonly startAtLogin: () => boolean
   /** Register or remove the login item and persist the choice. */
   readonly toggleStartAtLogin: () => void
+  /** Whether a finished task should raise a native notification. */
+  readonly taskCompletionNotice: () => boolean
+  /** Flip and persist the notification preference. */
+  readonly toggleTaskCompletionNotice: () => void
 }
 
 /** Tray icon present for the whole run, not only while the window is hidden. */
@@ -41,6 +45,8 @@ export class DesktopTray {
       { type: 'separator' },
       { label: messages.startAtLogin, type: 'checkbox', checked: this.options.startAtLogin(),
         click: () => { this.options.toggleStartAtLogin() } },
+      { label: messages.taskCompletionNotice, type: 'checkbox', checked: this.options.taskCompletionNotice(),
+        click: () => { this.options.toggleTaskCompletionNotice() } },
       { type: 'separator' },
       { label: messages.quitApplication, click: () => { this.options.quit() } },
     ]))

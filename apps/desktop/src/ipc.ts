@@ -36,6 +36,8 @@ export const DESKTOP_IPC = {
   windowFullscreen: 'dsh-desktop:window-fullscreen',
   windowsAppearance: 'dsh-desktop:windows-appearance',
   windowsMenu: 'dsh-desktop:windows-menu',
+  taskNotice: 'dsh-desktop:task-notice',
+  taskNoticeOpen: 'dsh-desktop:task-notice-open',
 } as const
 
 /** Desktop release update state rendered by desktop-owned UI. */
@@ -91,6 +93,37 @@ export interface DshDesktopProductApi {
     open(): Promise<void>
     subscribe(listener: (state: DesktopUpdatePresentation) => void): () => void
   }
+  readonly notifications: DesktopNotificationApi
+}
+
+/** One request for a native notification about work that finished while the window was not visible. */
+export interface DesktopTaskNotice {
+  /** Session the work belongs to; the open request selects it. */
+  readonly sessionId: string
+  /** Notification title, already localized by the renderer. */
+  readonly title: string
+  /** Notification body, already localized by the renderer. */
+  readonly body: string
+}
+
+/**
+ * Native task notifications. The renderer decides when one is warranted (the
+ * window is hidden and a turn just finished); the shell owns the platform
+ * notification and the click that returns to the session.
+ */
+export interface DesktopNotificationApi {
+  /**
+   * Show one native notification.
+   * @param notice - localized copy and the session to return to.
+   * @returns true when a notification was shown.
+   */
+  notify(notice: DesktopTaskNotice): Promise<boolean>
+  /**
+   * Observe clicks on task notifications.
+   * @param listener - receives the session id to open.
+   * @returns the unsubscribe function.
+   */
+  subscribe(listener: (sessionId: string) => void): () => void
 }
 
 /** Scheme of Desktop-owned application documents. */

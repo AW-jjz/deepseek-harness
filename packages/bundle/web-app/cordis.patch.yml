@@ -258,6 +258,10 @@
     - id: ui-layout
       name: '@deepseek-ai/dsh-client-ui-layout'
 
+    # Native task notifications: a no-op in a browser tab (no preload bridge).
+    - id: ui-desktop-notice
+      name: '@deepseek-ai/dsh-client-ui-desktop-notice'
+
     - id: ui-renderer
       name: '@deepseek-ai/dsh-client-ui-renderer'
 

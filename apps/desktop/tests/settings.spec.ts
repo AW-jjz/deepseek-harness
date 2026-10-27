@@ -25,8 +25,9 @@ it('creates a discoverable default file on first launch without touching other p
   expect(readDesktopSettings(userData)).toEqual({
     updates: { allowTestAuthPopupWindow: false },
     launch: { startAtLogin: false },
+    notifications: { taskCompletion: true },
   })
-  expect(readFileSync(path, 'utf8')).toBe('{\n  \"updates": {\n    \"allowTestAuthPopupWindow": false\n  },\n  \"launch": {\n    \"startAtLogin": false\n  }\n}\n')
+  expect(readFileSync(path, 'utf8')).toBe('{\n  \"updates": {\n    \"allowTestAuthPopupWindow": false\n  },\n  \"launch": {\n    \"startAtLogin": false\n  },\n  \"notifications": {\n    \"taskCompletion": true\n  }\n}\n')
   expect(readFileSync(join(userData, 'keybindings.json'), 'utf8')).toBe('existing shortcuts\n')
 })
 
