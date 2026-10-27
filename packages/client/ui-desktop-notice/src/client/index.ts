@@ -28,6 +28,9 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
   }
 }
 
+/** Client services this plugin reads: the session catalog, locale copy, and the workspace opener. */
+export const inject = ['sessions', 'locale', 'uiWorkspace']
+
 /** Namespace for the notification copy. */
 export const NS = 'desktop-notice'
 

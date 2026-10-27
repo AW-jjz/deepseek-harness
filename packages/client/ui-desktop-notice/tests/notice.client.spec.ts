@@ -85,10 +85,13 @@ describe('desktop notification plugin', () => {
     })).toBeUndefined()
   })
 
-  it('does nothing in a browser tab without the desktop bridge', async () => {
+  it('declares the services it reads and does nothing without the desktop bridge', async () => {
     const module = await load('../src/client/index.ts')
+    expect(module.inject).toEqual(['sessions', 'locale', 'uiWorkspace'])
     const ctx = new Context()
     try {
+      // No bridge in this environment: the plugin must return before it reads
+      // any injected service, so a bare context is enough.
       expect(() => { module.apply(ctx as never) }).not.toThrow()
     } finally { await ctx.fiber.dispose() }
   })
