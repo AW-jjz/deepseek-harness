@@ -76,6 +76,9 @@ vi.mock('electron', () => ({
     on() { return this }
     isDestroyed() { return false }
     isMinimized() { return false }
+    getNormalBounds() { return { x: 0, y: 0, width: 1280, height: 820 } }
+    isMaximized() { return false }
+    maximize = vi.fn()
     restore = vi.fn()
     focus = state.focusWorkspace
     moveTop = state.moveTopWorkspace
@@ -85,6 +88,10 @@ vi.mock('electron', () => ({
     async loadURL(url: string) { state.contents = this.webContents; await state.loadWorkspace(url); this.ready?.() }
   },
   net: { fetch: vi.fn() },
+  screen: {
+    getPrimaryDisplay: () => ({ id: 1, workArea: { x: 0, y: 0, width: 1920, height: 1080 } }),
+    getAllDisplays: () => [{ id: 1, workArea: { x: 0, y: 0, width: 1920, height: 1080 } }],
+  },
   nativeTheme: state.nativeTheme,
   session: { defaultSession: {
     setPermissionCheckHandler: vi.fn(), setPermissionRequestHandler: vi.fn(), webRequest: { onBeforeSendHeaders: vi.fn() },

@@ -17,12 +17,16 @@ import {
   nativeTheme,
   net,
   protocol,
+  screen,
   session,
   shell,
   type IpcMainInvokeEvent,
   type MenuItemConstructorOptions,
 } from 'electron'
 import { resolveDesktopPaths } from './paths.ts'
+import {
+  placeWindow, readWindowGeometry, writeWindowGeometry, type WindowPlacement, type WorkArea,
+} from './window-state.ts'
 import { DesktopProjectManager } from './project-manager.ts'
 import { DesktopHostFatalError, DesktopHostProcess, DesktopHostUncleanExitError } from './host-process.ts'
 import { DesktopPlatformView, PLATFORM_IPC, platformBounds } from './platform-view.ts'
@@ -221,10 +225,47 @@ function platformLoginUrl(authorizeUrl: string): string {
   return url.href
 }
 
-function createWindow(preload: string, show = false, primary = false): BrowserWindow {
+/** Every display's usable area, primary first: the fallback placement centers there. */
+function workAreas(): WorkArea[] {
+  const primary = screen.getPrimaryDisplay()
+  return [primary, ...screen.getAllDisplays().filter(display => display.id !== primary.id)]
+    .map(display => display.workArea)
+}
+
+/**
+ * Remember the primary window's geometry once it settles, and once more as it
+ * closes. `getNormalBounds` is the pre-maximize rectangle, so maximizing and
+ * restoring both keep the last windowed size.
+ * @param window - the shell's primary window.
+ */
+function rememberWindowGeometry(window: BrowserWindow): void {
+  const userData = app.getPath('userData')
+  let timer: NodeJS.Timeout | undefined
+  const save = (): void => {
+    if (window.isDestroyed()) return
+    const bounds = window.getNormalBounds()
+    void writeWindowGeometry(userData, { ...bounds, maximized: window.isMaximized() }).catch(() => undefined)
+  }
+  const schedule = (): void => {
+    if (timer !== undefined) clearTimeout(timer)
+    timer = setTimeout(() => { timer = undefined; save() }, 400)
+    timer.unref()
+  }
+  window.on('resize', schedule)
+  window.on('move', schedule)
+  window.on('maximize', schedule)
+  window.on('unmaximize', schedule)
+  window.on('close', () => {
+    if (timer !== undefined) { clearTimeout(timer); timer = undefined }
+    save()
+  })
+}
+
+function createWindow(preload: string, show = false, primary = false, placement?: WindowPlacement): BrowserWindow {
   const window = new BrowserWindow({
-    width: 1280,
-    height: 820,
+    width: placement?.bounds?.width ?? 1280,
+    height: placement?.bounds?.height ?? 820,
+    ...placement?.bounds === undefined ? {} : { x: placement.bounds.x, y: placement.bounds.y },
     minWidth: 520,
     minHeight: 600,
     show,
@@ -1109,7 +1150,10 @@ async function main(): Promise<void> {
     }
   }
   const createMainWindow = (): BrowserWindow => {
-    const window = createWindow(appPreload, false, true)
+    const placement = placeWindow(readWindowGeometry(app.getPath('userData')), workAreas())
+    const window = createWindow(appPreload, false, true, placement)
+    if (placement.maximized) window.maximize()
+    rememberWindowGeometry(window)
     mainWindow = window
     browserGuests.bind(window, (guest, name) => shortcuts.attachGuest(window, guest, name))
     shortcuts.attach(window)

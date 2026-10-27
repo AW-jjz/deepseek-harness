@@ -101,6 +101,11 @@ const harness = await vi.hoisted(async () => {
     readonly restore = vi.fn()
     readonly setSize = vi.fn()
     readonly getBounds = vi.fn(() => ({ x: 0, y: 0, width: 800, height: 700 }))
+    /** Pre-maximize rectangle the shell saves; a fixed default keeps assertions stable. */
+    readonly getNormalBounds = vi.fn(() => ({ x: 100, y: 100, width: 1280, height: 820 }))
+    maximized = false
+    isMaximized(): boolean { return this.maximized }
+    readonly maximize = vi.fn(() => { this.maximized = true; this.emit('maximize') })
     readonly setMinimumSize = vi.fn()
     readonly setTitleBarOverlay = vi.fn()
     readonly setVibrancy = vi.fn()
@@ -204,11 +209,17 @@ const harness = await vi.hoisted(async () => {
     readonly destroy = vi.fn()
     constructor(readonly image: unknown) { super(); trays.push(this) }
   }
+  // One 1920x1080 display: enough for the saved-window placement the shell reads at startup.
+  const workArea = { x: 0, y: 0, width: 1920, height: 1080 }
+  const screen = {
+    getPrimaryDisplay: () => ({ id: 1, workArea }),
+    getAllDisplays: () => [{ id: 1, workArea }],
+  }
   const backgroundNotice = { close: vi.fn((hide: () => void) => { hide() }), dispose: vi.fn(), markerPath: undefined as string | undefined }
   const shellDialog = { isOpen: false, focus: vi.fn() }
   return {
     failWindow(error: Error) { windowFailure = error },
-    windows, views, hosts, handlers, app, FakeWindow, FakeView, FakeHost, powerMonitor, nativeTheme, analytics,
+    windows, views, hosts, handlers, app, FakeWindow, FakeView, FakeHost, powerMonitor, nativeTheme, analytics, screen,
     trays, FakeTray, backgroundNotice, shellDialog,
     menu, popup, socketHeaders: vi.fn(), loginShell, readLoginShell, updateCheck, updateDownload, updateInstall,
     platformDispose,
@@ -316,6 +327,7 @@ vi.mock('electron', () => ({
   } },
   protocol: { registerSchemesAsPrivileged: vi.fn(), handle: harness.protocolHandle },
   powerMonitor: harness.powerMonitor,
+  screen: harness.screen,
   Tray: harness.FakeTray,
   nativeImage: { createFromPath: (path: string) => ({ path }) },
 }))
