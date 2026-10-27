@@ -135,4 +135,12 @@ export interface Shortcuts {
    * @returns disposer removing the binding and catalog entry.
    */
   register(command: ShortcutCommand): () => void
+  /**
+   * Invoke a registered command independently of its optional key binding, the same path a
+   * native menu selection takes. Unknown ids and blocked resolutions are ignored: the caller
+   * offers a shortcut to a feature the current surface may not provide.
+   * @param id - registered product command.
+   * @param context - live input owner and modal state.
+   */
+  invoke(id: ShortcutCommandId, context: ShortcutContext): void
 }

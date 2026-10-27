@@ -300,6 +300,8 @@ export interface PerformanceUsageInjected {
 export interface ChatViewInjected {
   /** File preparation and failure callbacks owned by the file-drag plugin. */
   readonly fileDrag: import('@deepseek-ai/dsh-client-ui-primitives').FileDragActions
+  /** Run a registered product command, e.g. opening settings from a failure row. */
+  invokeCommand: (id: import('@deepseek-ai/dsh-client-shortcuts/client').ShortcutCommandId) => void
   /** Dispatch one gesture to the Conversation plugin registry. */
   dispatchInteraction: (gesture: TextInteractionGesture) => string | null
   hooks: {
@@ -334,7 +336,7 @@ export interface ChatViewInjected {
 }
 
 /** Session-owned node sources shared with the view, plus the flow's connection state. */
-export type ChatFlowDataInjected = Pick<ChatViewInjected, 'keyedHooks'> & {
+export type ChatFlowDataInjected = Pick<ChatViewInjected, 'keyedHooks' | 'invokeCommand'> & {
   hooks: Pick<ChatViewInjected['hooks'], 'presentation'> & {
     /** Client connection lifecycle; the running clock pauses while it is not connected. */
     connectionState: ConnectionStateSource

@@ -5,9 +5,10 @@ import type { PropsRenderFactories } from '@deepseek-ai/dsh-client-ui-slots'
 import type { UserTextFacts } from '@deepseek-ai/dsh-client-ui-conversation/client'
 import { JsonBlock, StateDot, TextShimmer } from '@deepseek-ai/dsh-client-ui-primitives'
 import type {
-  ChatNodeOwnerProps, ChatNodeViewProps, ChatViewSlotProps, UserContentAttachment, UserContentData, UserContentInput,
+  ChatNodeOwnerProps, ChatNodeViewProps, ChatViewInjected, ChatViewSlotProps, UserContentAttachment, UserContentData, UserContentInput,
 } from '../contract/slots.ts'
 import type { ModelRetryNode, TurnErrorNode, UserMessageNode } from '../contract/snapshot.ts'
+import type { ShortcutCommandId } from '@deepseek-ai/dsh-client-shortcuts/client'
 import { CompactionItem } from './CompactionItem.tsx'
 import { ContextInjectionRow } from './ContextInjectionRow.tsx'
 import { MessageIconActions } from './MessageIconActions.tsx'
@@ -58,6 +59,28 @@ function failureMessage(
   if (code === 'ACCOUNT_SIGN_IN_REQUIRED') return t('message.failure.accountSignInRequired')
   if (code === 'QUOTA' || code === 'ACCOUNT_QUOTA') return t('message.failure.quota')
   return code === 'AUTH' ? t('message.failure.auth') : message
+}
+
+/** What the failure row offers beyond the message, by failure code. */
+type TurnErrorAction = { readonly label: string; readonly command?: ShortcutCommandId }
+
+/**
+ * Pick one next step for a terminal failure.
+ *
+ * The message explains what happened; the action is what to do about it. Only codes with a
+ * real destination get one — an unknown provider error has no honest button.
+ * @param code - Failure code recorded on the node.
+ * @param t - Chat namespace translator.
+ * @returns The action, or undefined when none applies.
+ */
+export function turnErrorAction(code: string | undefined, t: ChatViewSlotProps['t']): TurnErrorAction | undefined {
+  if (code === 'AUTH' || code === 'ACCOUNT_SIGN_IN_REQUIRED' || code === 'ACCOUNT_SIGNED_OUT') {
+    return { label: t('message.failureAction.account'), command: 'settings.open' as ShortcutCommandId }
+  }
+  if (code === 'QUOTA' || code === 'ACCOUNT_QUOTA') {
+    return { label: t('message.failureAction.account'), command: 'settings.open' as ShortcutCommandId }
+  }
+  return undefined
 }
 
 function ModelRetryItem({ node, active, t }: {
@@ -129,16 +152,25 @@ function ModelRetryItem({ node, active, t }: {
 }
 
 /** Persistent, turn-positioned feedback for a terminal failure. */
-function TurnErrorItem({ node, t }: {
+function TurnErrorItem({ node, t, invokeCommand }: {
   node: TurnErrorNode
   t: ChatViewSlotProps['t']
+  invokeCommand: (id: ShortcutCommandId) => void
 }) {
+  const action = turnErrorAction(node.code, t)
+  const runAction = (): void => {
+    if (action?.command === undefined) return
+    invokeCommand(action.command)
+  }
   return (
     <div className={css.turnErrorRow} role="status">
       <StateDot state="error" className={css.turnErrorDot} />
       <div className={css.turnErrorCopy}>
         <span className={css.turnErrorTitle}>{node.code === 'ACCOUNT_SIGNED_OUT' || node.code === 'INTERRUPTED' ? t('message.taskStopped') : t('message.turnError')}</span>
         <span className={css.turnErrorMessage}>{failureMessage(node.message, node.code, t)}</span>
+        {action !== undefined && (
+          <button type="button" className={css.turnErrorAction} onClick={runAction}>{action.label}</button>
+        )}
       </div>
       {node.code !== undefined && node.code !== 'INTERRUPTED' && <code className={css.turnErrorCode}>{node.code}</code>}
     </div>
@@ -350,8 +382,8 @@ export const RetryNodeView = memo(function RetryNodeView({ node, t }: ChatNodeVi
 })
 
 /** Terminal turn-error keyed Chat renderer. */
-export const TurnErrorNodeView = memo(function TurnErrorNodeView({ node, t }: ChatNodeViewProps<'turn-error'>) {
-  return <TurnErrorItem node={node.data} t={t} />
+export const TurnErrorNodeView = memo(function TurnErrorNodeView({ node, t, invokeCommand }: ChatNodeViewProps<'turn-error'> & { invokeCommand?: ChatViewInjected['invokeCommand'] }) {
+  return <TurnErrorItem node={node.data} t={t} invokeCommand={invokeCommand ?? (() => {})} />
 })
 
 /** Max-tokens turn-end notice keyed Chat renderer. */

@@ -74,6 +74,10 @@ export default class ShortcutsService extends Service implements Shortcuts {
     ctx.effect(() => ctx.locale.subscribe(() => { this.registry.refreshLabels() }), 'shortcuts: locale')
   }
 
+  invoke(id: Parameters<Shortcuts['invoke']>[0], context: Parameters<Shortcuts['invoke']>[1]): void {
+    this.registry.invoke(id, context)
+  }
+
   register(command: Parameters<Shortcuts['register']>[0]): () => void {
     const off = this.registry.register(command)
     this.syncDefinitions()

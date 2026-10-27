@@ -7,6 +7,7 @@ import type {} from '@deepseek-ai/dsh-api-remotes/client'
 import type { SessionBinding } from '@deepseek-ai/dsh-api-session-controller/client'
 import type { GroupKey } from '@deepseek-ai/dsh-client-ui-conversation/client'
 import { createSnapshotStore, type ObservableSnapshot } from '@deepseek-ai/dsh-client-store'
+import type { Shortcuts } from '@deepseek-ai/dsh-client-shortcuts/client'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type {} from '@deepseek-ai/dsh-client-ui-sidebar-right/client'
 import type {} from '@deepseek-ai/dsh-client-ui-sidebar-browser/client'
@@ -207,6 +208,12 @@ export function apply(ctx: Context): void {
 
   const connectionHandle = ctx.get('connection') as ConnectionHandle
   const connectionState = connectionHandle.state
+  // Failure rows open settings through the same registry the menus use; the shortcuts plugin
+  // may be absent (minimal profiles), in which case the action simply does not render.
+  const shortcuts = ctx.get('shortcuts')
+  const invokeCommand = (id: Parameters<Shortcuts['invoke']>[0]): void => {
+    shortcuts?.invoke(id, { region: 'page', modal: null, target: null })
+  }
   const nodeSources = (binding: SessionBinding): Pick<ChatViewInjected, 'keyedHooks'> => {
     const chat = chatSource(binding)
     const conversation = ctx.uiConversation.binding(binding)
@@ -232,6 +239,7 @@ export function apply(ctx: Context): void {
         ...nodeSources(binding),
         hooks: { presentation, connectionState },
         reconnect: () => { connectionHandle.reconnect() },
+        invokeCommand,
       }
     },
   }, ChatFlow))
@@ -256,6 +264,7 @@ export function apply(ctx: Context): void {
         return {
           ...nodeSources(binding),
           fileDrag: ctx.fileDrag.actions,
+          invokeCommand,
           hooks: { presentation, interactionIds: ctx.uiConversation.interactions },
           dispatchInteraction: gesture => ctx.uiConversation.interactions.dispatch(sessionId, gesture),
           fileMentions: (owner: TurnTailOwnerProps) => ctx.get('chatFileMentions')?.forClosing(owner, sessionId),

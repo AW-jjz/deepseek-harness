@@ -299,6 +299,23 @@
   font: var(--dsw-font-markdown-code-block-small);
 }
 
+/* Follows the message on its own line: the action is the way out of the failure,
+   so it stays reachable rather than hiding behind the code chip. */
+.turnErrorAction {
+  display: block;
+  margin-top: 4px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--dsw-alias-brand-primary);
+  font: inherit;
+  cursor: pointer;
+}
+
+.turnErrorAction:hover {
+  opacity: 0.8;
+}
+
 .maxTokensTitle {
   margin-right: 6px;
   color: var(--dsw-alias-state-warn-primary);

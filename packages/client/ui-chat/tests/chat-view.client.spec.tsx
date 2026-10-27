@@ -470,6 +470,7 @@ function makeHarness(
   const SessionProviderStub: ChatViewSlotProps['SessionProvider'] = ({ children }) => <>{children}</>
   const props: HarnessStandardProps = {
     fileDrag,
+    invokeCommand: vi.fn(),
     renderFactorySlot,
     usePanelInfo: selector => selector({ activePanelId: null }),
     sessionId: SID,
@@ -2484,10 +2485,12 @@ describe('ChatView', () => {
     const view = render(<h.ChatView {...h.props} />)
     const statuses = view.getAllByRole('status')
     expect(statuses.map(status => status.textContent)).toEqual([
-      '本轮运行失败API 密钥无效AUTH',
+      // Codes with a real destination carry the account action; an unknown provider error
+      // does not, because there is no honest button for it.
+      '本轮运行失败API 密钥无效管理账户与密钥AUTH',
       '本轮运行失败plugin exploded',
-      '本轮运行失败当前请求的额度已用尽QUOTA',
-      '本轮运行失败当前请求的额度已用尽ACCOUNT_QUOTA',
+      '本轮运行失败当前请求的额度已用尽管理账户与密钥QUOTA',
+      '本轮运行失败当前请求的额度已用尽管理账户与密钥ACCOUNT_QUOTA',
       '任务已停止DSH 进程在本轮完成前退出（例如被强制结束、崩溃或关闭超时），重新启动后本轮已中止。未完成的工具调用结果未知。',
     ])
     // The transient notice is the frame-wide host's job; the failure row keeps
@@ -2495,6 +2498,15 @@ describe('ChatView', () => {
     expect(view.queryByRole('alert')).toBeNull()
     expect(view.queryByRole('dialog')).toBeNull()
     expect(view.queryByRole('button', { name: '去充值' })).toBeNull()
+    // The action rows route through the shared command registry; the INTERRUPTED
+    // and unknown-code rows render no button at all.
+    const buttons = statuses.map(status => [...status.querySelectorAll('button')].map(button => button.textContent))
+    expect(buttons).toEqual([
+      ['管理账户与密钥'], [], ['管理账户与密钥'], ['管理账户与密钥'], [],
+    ])
+    const invokeCommand = h.props.invokeCommand as ReturnType<typeof vi.fn>
+    fireEvent.click(statuses[0]!.querySelector('button')!)
+    expect(invokeCommand).toHaveBeenCalledExactlyOnceWith('settings.open')
   })
 
   it('renders the max-tokens notice with localized guidance, distinct from turn errors', () => {
