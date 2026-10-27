@@ -68,7 +68,13 @@ minimumReleaseAgeExclude:
   # point of bumping it; waiting out the release age would defeat that.
   - '@earendil-works/pi-ai@1.3.0'
   - '@earendil-works/pi-telemetry@1.3.0'
-  # This addon release recognizes the Electron 44.9.3 Node/V8 fingerprint used by Desktop.
+  # This addon release does NOT accept the Electron 44.9.3 fingerprint: its published matrix is
+  # 43.0.0 / 44.0.0 / 44.7.0 / 45.0.0-alpha.6. Desktop therefore runs the flag-first bridge
+  # (`--expose-internals`, see apps/desktop/src/host-process.ts and the release record), and the
+  # addon stays pinned for plain-Node consumers whose fingerprint it does cover. The packaged
+  # smoke boots a Host through the same resolver, so the supported path is gated by execution;
+  # the per-run truth is the `addon available: …  via: direct requireBuiltin probe` line, not
+  # this comment.
   - node-addon-native-custom-loader@0.1.9
   - node-addon-require-builtin-darwin-arm64@0.1.9
   - node-addon-require-builtin-darwin-x64@0.1.9
@@ -105,7 +111,9 @@ minimumReleaseAgeExclude:
   # The package manager is a workspace devDependency, so its own exact pin
   # must be exempt from the release-age window that guards other packages.
   - pnpm@11.28.5
-  # Desktop packaging requires this Electron fingerprint with node-addon-require-builtin 0.1.9.
+  # The Electron release Desktop ships. Its embedded Node version is what the primary-runtime
+  # lock pins; whether the require-builtin addon accepts its fingerprint is reported at startup,
+  # never assumed here.
   - electron@44.9.3
 patchedDependencies:
   '@botiverse/oar@0.67.0': patches/@botiverse__oar@0.67.0.patch

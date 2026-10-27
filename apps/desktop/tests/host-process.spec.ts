@@ -256,6 +256,15 @@ describe('desktop host process', () => {
     expect(await response.json()).toEqual({ runtime, profile, cwd: realpathSync(profile), nodePath: '/custom', registry: 'https://registry.example.test/', nodeOptions: '--no-warnings', runAsNode: '1', internals: true })
   })
 
+  it('drops the native-internals flag only when the deployment opts out', async () => {
+    const runtime = projectWithHost()
+    const host = hostProcess(runtime, runtime, undefined, { ...process.env, DSH_EXPOSE_INTERNALS: '0' })
+    const { url } = await host.start()
+    // The R-16 bridge comment in `apps/desktop/src/host-process.ts` claims this default and
+    // this single opt-out; both are asserted here so a change to either breaks a test.
+    expect((await (await fetch(url)).json()).internals).toBe(false)
+  })
+
   it.each([
     ["process.send({ type: 'fatal', message: 'startup failed' }); process.disconnect()", 'startup failed'],
     ["process.send({ type: 'ready', url: 4 })", 'invalid IPC event'],
