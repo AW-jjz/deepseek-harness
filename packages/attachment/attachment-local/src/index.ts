@@ -164,7 +164,7 @@ export class LocalAttachmentStore extends AttachmentStore {
   })
 
   /** Absolute versioned storage root. */
-  readonly root: string
+  override readonly root: string
   readonly imageLimits: ImageAttachmentLimits
   /** Resolved provider-independent normalization policy. */
   readonly normalizationPolicy: Readonly<NormalizationPolicy>
@@ -292,4 +292,8 @@ export class LocalAttachmentStore extends AttachmentStore {
 
 }
 
+export {
+  isCollectable, listStoredObjects, sweepUnreferencedObjects,
+  type AttachmentSweepOptions, type AttachmentSweepResult, type StoredObject,
+} from './gc.ts'
 export default LocalAttachmentStore

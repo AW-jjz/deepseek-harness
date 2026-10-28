@@ -83,6 +83,13 @@ export abstract class AttachmentStore extends Service {
   abstract readonly imageLimits: ImageAttachmentLimits
 
   /**
+   * Directory this store keeps its content-addressed objects under, when it has
+   * one. Maintenance reads it instead of re-deriving the deployment's root; a
+   * store without durable local objects omits it.
+   */
+  readonly root?: string
+
+  /**
    * Validate one image without persisting it.
    * Batch callers validate every member before saving any member.
    * @param input - encoded bytes, declared media type, and optional display name.

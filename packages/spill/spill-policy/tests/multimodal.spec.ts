@@ -36,7 +36,7 @@ class TestAttachments extends AttachmentStore {
     mediaTypes: ['image/png'] as const,
   }
   private ordinal = 0
-  constructor(ctx: Context, readonly root: string) { super(ctx) }
+  constructor(ctx: Context, override readonly root: string) { super(ctx) }
   validateImage(): Promise<void> { return Promise.resolve() }
   async saveImage(input: SaveImageAttachment): Promise<ImageAttachmentRef> {
     const ref: ImageAttachmentRef = {

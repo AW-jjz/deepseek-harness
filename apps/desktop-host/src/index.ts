@@ -6,6 +6,7 @@ import { inspect } from 'node:util'
 import { CordisError } from '@deepseek-ai/cordis'
 import { loadLayeredEnv, loadProfileDirectory, reportSkippedBundles } from '@deepseek-ai/dsh-app-boot'
 import { runProfile } from '@deepseek-ai/dsh/profile-boot'
+import { installAttachmentMaintenance } from './attachment-maintenance.ts'
 import type {} from '@deepseek-ai/dsh-client-connection'
 import type {} from '@deepseek-ai/dsh-host-webserver'
 import type {} from '@deepseek-ai/dsh-deepseek-account'
@@ -166,6 +167,9 @@ async function main(): Promise<void> {
     if (stopping === undefined && process.connected) {
       process.send?.({ type: 'ready', url, injections }, (error) => { if (error !== null) console.error(error) })
     }
+    // Daily attachment retention runs after readiness: it reads every stored log,
+    // so it must never delay the window, and it contains its own failures.
+    void installAttachmentMaintenance(ctx)
   } catch (error) {
     // The context can complete disposal mid-tail (e.g. between the guard and a
     // registration); nothing in the tail may outlive its context.

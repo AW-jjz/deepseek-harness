@@ -52,6 +52,10 @@ The generated [configuration catalog](../../../docs/config-catalog.md#deepseek-a
 
 ### Where your images are stored and how long they last
 
+Objects are content-addressed and never overwritten, so nothing in this package deletes them; the Desktop Host runs a daily maintenance pass that reclaims objects no retained Session log names. The safety rules are one-sided: the pass reads every stored log (including ones parked in the Session store's recycle bin) and abandons the whole run if any log cannot be read, and it never removes an object younger than a day, so a write in flight cannot lose its bytes to a scan that started before the log was written. A digest that merely appears in text only keeps an object longer.
+
+
+
 Attached images are kept below `<DSH_HOME>/attachments/v1` on this machine. Stored images are never deleted automatically, identical images are stored only once, and a later tightening of the limits never makes already-saved images unreadable. If your images must be readable from another machine, this package is not the right fit.
 
 ### What happens when you attach an image
