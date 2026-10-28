@@ -58,6 +58,7 @@ import {
   sanitizeFtsText,
   SQLITE_MAX_PAGE_LIMIT,
 } from './query.ts'
+import { cjkIndexTerms, cjkQuery, hasCjk } from './cjk.ts'
 
 export {
   SESSION_QUERY_SQLITE_APPLICATION_ID,
@@ -596,13 +597,14 @@ export class SqliteSessionQueryEngine extends SessionQueryEngine {
       generation,
     )
     const insert = db.prepare(`
-      INSERT INTO persisted_docs (text, session_id, seq, type, time, surface, codepoint_length)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO persisted_docs (text, norm, session_id, seq, type, time, surface, codepoint_length)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `)
     for (const document of entry.documents) {
       const text = sanitizeFtsText(document.text)
       insert.run(
         text,
+        cjkIndexTerms(text),
         document.sessionId,
         document.seq,
         document.type,
@@ -627,13 +629,14 @@ export class SqliteSessionQueryEngine extends SessionQueryEngine {
       generation,
     )
     const insert = db.prepare(`
-      INSERT INTO temp.live_docs (text, session_id, seq, type, time, surface, codepoint_length)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO temp.live_docs (text, norm, session_id, seq, type, time, surface, codepoint_length)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `)
     for (const document of entry.documents) {
       const text = sanitizeFtsText(document.text)
       insert.run(
         text,
+        cjkIndexTerms(text),
         document.sessionId,
         document.seq,
         document.type,
@@ -852,7 +855,9 @@ function selectedDocumentsSql(): { sql: string } {
 }
 
 function selectedDocumentsParams(query: string, persistenceVisible: boolean): Array<string | number> {
-  const expression = quoteFtsData(query)
+  // A CJK query matches the bigram column instead of one unsegmentable phrase;
+  // an ASCII query keeps the single-phrase semantics it always had.
+  const expression = hasCjk(query) ? cjkQuery(query) : quoteFtsData(query)
   const visible = persistenceVisible ? 1 : 0
   return [
     FTS_HIGHLIGHT_START,

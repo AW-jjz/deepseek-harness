@@ -365,6 +365,27 @@ describe('SQLite session search', () => {
       .resolves.toMatchObject({ items: [{ header: session.header, live: true, persisted: false }] })
   })
 
+  it('finds Chinese text by word even though the script has no spaces', async () => {
+    const ctx = await liveContext({ path: ':memory:', snippetChars: 40 })
+    const session = ctx.sessions.create(SessionId('cjk'))
+    session.append(
+      'user/message',
+      createUserMessage({
+        content: [{ type: 'text', text: '检查磁盘空间与错误日志' }], source: { kind: 'user' },
+      }),
+      { surfaceOp: 'append' },
+    )
+
+    // A two-character word matches the pair, a longer phrase matches every
+    // adjacent pair, and a single character still finds the run it sits in.
+    for (const query of ['磁盘', '磁盘空间', '盘空', '错']) {
+      await expect(ctx.sessionQuery.searchSessions({ query }))
+        .resolves.toMatchObject({ items: [{ header: session.header }] })
+    }
+    // A word the text does not contain stays absent.
+    await expect(ctx.sessionQuery.searchSessions({ query: '网络' })).resolves.toEqual({ items: [] })
+  })
+
   it('excludes assistant reasoning while indexing visible answer text', async () => {
     const ctx = await liveContext()
     const session = ctx.sessions.create(SessionId('reasoning'))

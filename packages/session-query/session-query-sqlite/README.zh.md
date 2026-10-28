@@ -60,7 +60,7 @@ kind: "package-reference"
 
 排序是确定性的：实际 FTS5 高亮匹配 span 更多的在前，然后文档更短的在前，事件时间、会话 id 与 seq 打破平局。结果携带按 `snippetChars` 个 Unicode 码点截断的纯文本摘录，没有提供方专用数值分数。分页通过不透明 `SessionSearchCursor` 延续，游标绑定到规范化后的确切请求；相关语料库变化时游标变为陈旧（`SESSION_QUERY_STALE_CURSOR`），会话内游标可在不相关会话变化后延续，跨会话游标则不能。
 
-`unicode61` tokenizer 匹配 token 与短语，而非任意子字符串：`AI` 不匹配 token `BRAID`。需要执行字面、空白灵活的字符串子串扫描时，使用带 `text` 子句的 `ctx.sessionQuery.filterEvents()`。
+`unicode61` tokenizer 匹配 token 与短语，而非任意子字符串：`AI` 不匹配 token `BRAID`。中日韩文本没有可供分词器切分的分隔符，因此索引另外带一列中日韩单字与相邻双字；查询里的中日韩片段会被改写成相同的词项，于是 `磁盘` 能在 `检查磁盘空间` 中命中，而更长的词组要求每一对相邻双字都命中。ASCII 查询保持原有的整句短语语义；中文结果的摘录显示文本开头，因为展示列对这些词项不会标出任何字符。需要执行字面、空白灵活的字符串子串扫描时，使用带 `text` 子句的 `ctx.sessionQuery.filterEvents()`。
 
 ### 何时推迟或关闭搜索
 

@@ -4,8 +4,13 @@ import type { DatabaseSync } from 'node:sqlite'
 import { mkdir, open } from 'node:fs/promises'
 import { dirname, resolve } from 'node:path'
 
-/** Current derived-index schema version. Incompatible versions reset in place. */
-export const SESSION_QUERY_SQLITE_SCHEMA_VERSION = 8
+/**
+ * Current derived-index schema version. Incompatible versions reset in place.
+ *
+ * Version 9 added the `norm` column: the CJK unigrams and bigrams that make a
+ * script without spaces searchable under `unicode61`.
+ */
+export const SESSION_QUERY_SQLITE_SCHEMA_VERSION = 9
 
 /** SQLite application id protecting unrelated databases from derived resets. */
 export const SESSION_QUERY_SQLITE_APPLICATION_ID = 0x44534851
@@ -126,6 +131,7 @@ function ensurePersistentSchema(db: DatabaseSync): void {
   db.exec(`
     CREATE VIRTUAL TABLE IF NOT EXISTS persisted_docs USING fts5(
       text,
+      norm,
       session_id UNINDEXED,
       seq UNINDEXED,
       type UNINDEXED,
@@ -157,6 +163,7 @@ function ensureTemporarySchema(db: DatabaseSync): void {
   db.exec(`
     CREATE VIRTUAL TABLE IF NOT EXISTS temp.live_docs USING fts5(
       text,
+      norm,
       session_id UNINDEXED,
       seq UNINDEXED,
       type UNINDEXED,

@@ -60,7 +60,7 @@ The generated [configuration catalog](../../../docs/config-catalog.md#deepseek-a
 
 Ranking is deterministic: more actual FTS5 highlighted-match spans first, then shorter documents, with event time, session id, and seq breaking ties. Results carry plain-text snippets bounded by `snippetChars` Unicode code points, with no provider-specific numeric score. Pages continue through an opaque `SessionSearchCursor` bound to the exact normalized request; a cursor becomes stale when its relevant corpus changes (`SESSION_QUERY_STALE_CURSOR`), and a within-session cursor survives changes to unrelated sessions while a cross-session cursor does not.
 
-The `unicode61` tokenizer matches tokens and phrases, not arbitrary substrings: `AI` does not match the token `BRAID`. Use `ctx.sessionQuery.filterEvents()` with a `text` clause when a literal whitespace-flexible substring scan is required.
+The `unicode61` tokenizer matches tokens and phrases, not arbitrary substrings: `AI` does not match the token `BRAID`. Chinese, Japanese, and Korean text has no separator for the tokenizer to split on, so the index carries a second column of CJK unigrams and adjacent bigrams; a query's CJK runs are rewritten into the same terms, which makes 磁盘 match inside 检查磁盘空间 while a longer phrase requires every adjacent pair. An ASCII query keeps its single-phrase semantics, and a CJK result shows the head of its text as the snippet because the display column marks no characters for those terms. Use `ctx.sessionQuery.filterEvents()` with a `text` clause when a literal whitespace-flexible substring scan is required.
 
 ### When to defer or disable search
 
