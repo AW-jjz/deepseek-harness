@@ -473,8 +473,10 @@ export class SessionController extends TypertRemoteService {
     if (remove === undefined) {
       throw new RemoteError('session/store-unavailable', 'this deployment cannot remove stored sessions', {})
     }
-    if (this.ctx.agents.get(request.sessionId) !== undefined) {
-      throw new RemoteError('session/agent-busy', 'close the session before removing it', { reason: 'live-agent' })
+    // A Session loaded in this window holds a read handle, and its Agent (when
+    // there is one) holds the write handle; either would make the store refuse.
+    if (this.ctx.agents.get(request.sessionId) !== undefined || this.ctx.sessions.get(request.sessionId) !== undefined) {
+      throw new RemoteError('session/agent-busy', 'close the session before removing it', { reason: 'live-session' })
     }
     signal.throwIfAborted()
     try {

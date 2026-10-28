@@ -54,7 +54,14 @@ async function bench(access: ClientAccessState, options: { ungroupedSession?: Se
   runtime.ctx.provide('uiConversation', {})
   runtime.ctx.provide('layout', { selectPanel: vi.fn(), beginNavigation: () => new AbortController().signal })
   runtime.releaseWorkspaceSource()
-  runtime.remote.provideNamespaces({ directoryPicker: {} })
+  runtime.remote.provideNamespaces({
+    directoryPicker: {},
+    // The delete action removes and restores stored Sessions through this namespace.
+    session: {
+      delete: vi.fn(() => Promise.resolve({ ok: true as const, value: {} })),
+      restore: vi.fn(() => Promise.resolve({ ok: true as const, value: { restoredPath: '/restored' } })),
+    },
+  })
   const locale = new LocaleRuntime(runtime.ctx)
   runtime.ctx.provide('locale', locale)
   runtime.slots.installLocale(locale)

@@ -43,7 +43,14 @@ async function createRuntime(): Promise<SlotTestRuntime> {
   // The rename flow never picks a directory; the namespace only has to be there
   // for ui-workspace's inject to settle.
   const directoryPicker = {}
-  runtime.remote.provideNamespaces({ directoryPicker })
+  runtime.remote.provideNamespaces({
+    directoryPicker,
+    // The delete action removes and restores stored Sessions through this namespace.
+    session: {
+      delete: vi.fn(() => Promise.resolve({ ok: true as const, value: {} })),
+      restore: vi.fn(() => Promise.resolve({ ok: true as const, value: { restoredPath: '/restored' } })),
+    },
+  })
   const locale = new LocaleRuntime(runtime.ctx)
   runtime.ctx.provide('locale', locale)
   runtime.slots.installLocale(locale)

@@ -159,6 +159,11 @@ async function bench(access: 'fake' | 'static' = 'fake') {
   const directoryPicker = { pick: pickDirectory }
   Object.assign(new TestRemote(ctx), { directoryPicker })
   ctx.provide('remote.directoryPicker', directoryPicker as never)
+  // The delete action removes and restores stored Sessions through the Session Remote.
+  ctx.provide('remote.session', {
+    delete: vi.fn(() => Promise.resolve({ ok: true as const, value: {} })),
+    restore: vi.fn(() => Promise.resolve({ ok: true as const, value: { restoredPath: '/restored' } })),
+  } as never)
   const locale = new LocaleRuntime(ctx)
   // These specs assert the shipped Chinese copy. There is no jsdom `window`
   // in this lane, so browser-language detection never runs and the locale
@@ -223,7 +228,8 @@ describe('ui-workspace apply', () => {
 
   it('declares the services it drives', () => {
     expect(inject).toEqual([
-      'slots', 'sessions', 'workspaces', 'locale', 'remote', 'remote.directoryPicker', 'layout', 'shortcuts', 'remoteAccess',
+      'slots', 'sessions', 'workspaces', 'locale', 'remote', 'remote.directoryPicker', 'remote.session',
+      'layout', 'shortcuts', 'remoteAccess',
     ])
   })
 

@@ -35,7 +35,13 @@ async function bench() {
   runtime.releaseWorkspaceSource()
   const directoryPicker = {}
   const { remote } = runtime
-  remote.provideNamespaces({ directoryPicker })
+  remote.provideNamespaces({
+    directoryPicker,
+    session: {
+      delete: vi.fn(() => Promise.resolve({ ok: true as const, value: {} })),
+      restore: vi.fn(() => Promise.resolve({ ok: true as const, value: { restoredPath: '/restored' } })),
+    },
+  })
   const locale = new LocaleRuntime(runtime.ctx)
   runtime.ctx.provide('locale', locale)
   runtime.slots.installLocale(locale)
