@@ -36,6 +36,22 @@ export interface DesktopRuntimeDescriptor {
   readonly files: readonly DesktopRuntimeFile[]
 }
 
+/** Inventory comparison found a file whose bytes, presence, or permissions differ. */
+export class DesktopRuntimeIntegrityError extends Error {
+  /** Slash-separated runtime path of the first mismatch, when one was identified. */
+  readonly path: string | undefined
+
+  /**
+   * @param message - Failure explanation.
+   * @param path - Slash-separated runtime path of the first mismatch.
+   */
+  constructor(message: string, path?: string) {
+    super(message)
+    this.name = 'DesktopRuntimeIntegrityError'
+    this.path = path
+  }
+}
+
 const PACKAGE_NAME = /^(?:@[a-z0-9][a-z0-9._~-]*\/[a-z0-9][a-z0-9._~-]*|[a-z0-9][a-z0-9._~-]*)$/u
 const readRuntimeFile = promisify(readFile)
 
@@ -207,12 +223,13 @@ export function readDesktopRuntime(root: string): DesktopRuntimeDescriptor {
  * Verify every packaged runtime file against its recorded bytes and permissions at build time.
  * @param root - Materialized runtime resources.
  * @param expectedVersion - Version the bundled runtime must declare: the product version ordinarily,
- * and a rewritten one for installed-update qualification.
+ * and a rewritten one for installed-update qualification. Omitted when verifying an installed tree
+ * whose shell version differs from the product version recorded at build time.
  * @param target - Required execution target; defaults to the current process.
  * @returns Validated runtime descriptor.
  */
 export async function verifyDesktopRuntime(
-  root: string, expectedVersion: string, target: { platform: NodeJS.Platform; arch: string } = process,
+  root: string, expectedVersion: string | undefined, target: { platform: NodeJS.Platform; arch: string } = process,
 ): Promise<DesktopRuntimeDescriptor> {
   const descriptor = readDesktopRuntime(root)
   // readDesktopRuntime preserves the disk schema value without validating release compatibility.
@@ -221,7 +238,9 @@ export async function verifyDesktopRuntime(
     throw new Error('desktop runtime: invalid descriptor or incompatible platform/architecture')
   }
   const release = parseDesktopRelease(descriptor.release)
-  if (release.version !== expectedVersion) throw new Error(`desktop runtime: bundled ${release.version} is not the expected ${expectedVersion}`)
+  if (expectedVersion !== undefined && release.version !== expectedVersion) {
+    throw new Error(`desktop runtime: bundled ${release.version} is not the expected ${expectedVersion}`)
+  }
   for (const entry of descriptor.sharedPackages) {
     const manifest: unknown = JSON.parse(readFileSync(join(runtimePath(root, entry.path), 'package.json'), 'utf8'))
     if (!record(manifest) || manifest.name !== entry.name || manifest.version !== entry.version) {
@@ -233,7 +252,28 @@ export async function verifyDesktopRuntime(
   const comparable = (items: readonly DesktopRuntimeFile[]): unknown => process.platform === 'win32'
     ? items.map(({ executable: _executable, ...item }) => item) : items
   if (JSON.stringify(comparable(descriptor.files)) !== JSON.stringify(comparable(actual))) {
-    throw new Error('desktop runtime: integrity verification failed')
+    const failed = firstDifference(descriptor.files, actual)
+    throw new DesktopRuntimeIntegrityError(
+      `desktop runtime: integrity verification failed${failed === undefined ? '' : ` for ${failed}`}`,
+      failed,
+    )
   }
   return descriptor
+}
+
+/** Name the first recorded file whose presence, size, hash, or executable bit differs. */
+function firstDifference(
+  expected: readonly DesktopRuntimeFile[],
+  actual: readonly DesktopRuntimeFile[],
+): string | undefined {
+  const comparable = process.platform === 'win32'
+  const byPath = new Map(actual.map(entry => [entry.path, entry]))
+  for (const entry of expected) {
+    const found = byPath.get(entry.path)
+    if (found === undefined) return entry.path
+    if (found.bytes !== entry.bytes || found.sha256 !== entry.sha256
+      || (!comparable && found.executable !== entry.executable)) return entry.path
+  }
+  const expectedPaths = new Set(expected.map(entry => entry.path))
+  return actual.find(entry => !expectedPaths.has(entry.path))?.path
 }

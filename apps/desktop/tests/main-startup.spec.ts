@@ -243,7 +243,7 @@ const harness = await vi.hoisted(async () => {
     set prepareUpdate(value: () => Promise<boolean>) { prepareUpdate = value },
     get publishUpdate() { return publishUpdate! },
     set publishUpdate(value: (state: DesktopUpdateState) => DesktopUpdateState) { publishUpdate = value },
-    dialog: { showOpenDialog: vi.fn(), showErrorBox: vi.fn(), showMessageBox: vi.fn() },
+    dialog: { showOpenDialog: vi.fn(), showErrorBox: vi.fn(), showMessageBox: vi.fn(), showMessageBoxSync: vi.fn() },
     openExternal: vi.fn(async () => {}),
     protocolHandle: vi.fn<(scheme: string, handler: (request: Request) => Response | Promise<Response>) => void>(),
     applyRelease: vi.fn(() => { preparing.resolve(); return prepared.promise }),
@@ -350,6 +350,25 @@ vi.mock('../src/login-shell-environment.ts', async importOriginal => ({
   readDesktopLoginShellEnvironment: harness.loginShell,
 }))
 vi.mock('../src/runtime-tree.ts', () => ({ readDesktopRuntime: () => ({ release: { version: '1.0.0' } }) }))
+const integrity = vi.hoisted(() => {
+  class RuntimeIntegrityError extends Error {
+    readonly path: string | undefined
+    constructor(message: string, path?: string) { super(message); this.path = path }
+  }
+  type Report = { ok: boolean; files: number; durationMs: number; path?: string; message?: string }
+  return {
+    RuntimeIntegrityError,
+    verifyCriticalRuntime: vi.fn(() => ({ descriptor: {}, files: ['node_modules/@deepseek-ai/dsh-desktop-host/lib/index.js'] })),
+    verifyRuntimeInBackground: vi.fn<(options: { onFailure?: (report: Report) => void }) => Promise<Report>>(
+      async () => ({ ok: true, files: 3, durationMs: 1 }),
+    ),
+  }
+})
+vi.mock('../src/runtime-integrity.ts', () => ({
+  RuntimeIntegrityError: integrity.RuntimeIntegrityError,
+  verifyCriticalRuntime: integrity.verifyCriticalRuntime,
+  verifyRuntimeInBackground: integrity.verifyRuntimeInBackground,
+}))
 vi.mock('../src/paths.ts', () => ({ resolveDesktopPaths: () => ({ profile: 'desktop-test-profile' }) }))
 vi.mock('../src/project-manager.ts', () => ({
   DesktopProjectManager: class {
@@ -434,6 +453,9 @@ beforeEach(() => {
   vi.clearAllMocks()
   harness.dialog.showMessageBox.mockReset()
   harness.dialog.showMessageBox.mockResolvedValue({ response: 1 })
+  harness.dialog.showMessageBoxSync.mockReset()
+  integrity.verifyCriticalRuntime.mockClear()
+  integrity.verifyRuntimeInBackground.mockClear()
   testAuth.login.mockReset()
   testAuth.login.mockResolvedValue('cancelled')
   vi.useFakeTimers()
@@ -2594,4 +2616,51 @@ it('disables native product events for a disabled Desktop launch', async () => {
   await harness.navigated.promise
   expect(harness.analytics).not.toHaveBeenCalled()
   harness.analyticsEnabled = true
+})
+
+describe('desktop runtime integrity at startup', () => {
+  it('refuses to create a window when a critical runtime entry does not match', async () => {
+    integrity.verifyCriticalRuntime.mockImplementationOnce(() => {
+      throw new integrity.RuntimeIntegrityError(
+        'desktop runtime: host entry does not match its recorded hash',
+        'node_modules/@deepseek-ai/dsh-desktop-host/lib/index.js',
+      )
+    })
+    await import('../src/main.ts')
+    await vi.advanceTimersByTimeAsync(0)
+    expect(harness.windows).toHaveLength(0)
+    expect(harness.dialog.showMessageBoxSync).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'error',
+      title: en.runtimeIntegrityTitle,
+      detail: expect.stringContaining('node_modules/@deepseek-ai/dsh-desktop-host/lib/index.js'),
+    }))
+    expect(harness.app.quit).toHaveBeenCalled()
+    expect(integrity.verifyRuntimeInBackground).not.toHaveBeenCalled()
+  })
+
+  it('verifies the whole tree in the background and stops after a mismatch', async () => {
+    integrity.verifyRuntimeInBackground.mockImplementationOnce(async (options) => {
+      // The real pass finishes after startup; report on the next task so Host startup proceeds first.
+      const report = { ok: false, files: 0, durationMs: 4, path: 'node_modules/@deepseek-ai/dsh-base/bundle.yml', message: 'mismatch' }
+      setTimeout(() => { options.onFailure?.(report) }, 0)
+      return report
+    })
+    await import('../src/main.ts')
+    await harness.preparing.promise
+    harness.prepared.resolve()
+    await harness.hostStarted.promise
+    harness.hosts[0]!.ready.resolve()
+    await harness.navigated.promise
+    await vi.advanceTimersByTimeAsync(0)
+    expect(integrity.verifyCriticalRuntime).toHaveBeenCalled()
+    expect(integrity.verifyRuntimeInBackground).toHaveBeenCalledWith(expect.objectContaining({
+      root: join('desktop-test-app', 'dsh'),
+      recordDirectory: join(harness.app.getPath('userData'), 'cache'),
+    }))
+    expect(harness.dialog.showMessageBoxSync).toHaveBeenCalledWith(expect.objectContaining({
+      title: en.runtimeIntegrityTitle,
+      detail: expect.stringContaining('node_modules/@deepseek-ai/dsh-base/bundle.yml'),
+    }))
+    expect(harness.app.quit).toHaveBeenCalled()
+  })
 })

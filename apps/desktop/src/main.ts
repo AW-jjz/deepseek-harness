@@ -64,6 +64,7 @@ import { DesktopTaskNotices } from './task-notice.ts'
 import { applyStartAtLogin, launchedHidden, launchOrigin, startAtLoginEnabled } from './login-item.ts'
 import { DesktopUpdateDialog, type UpdateDialogOptions } from './update-dialog.ts'
 import { readDesktopRuntime } from './runtime-tree.ts'
+import { RuntimeIntegrityError, verifyCriticalRuntime, verifyRuntimeInBackground } from './runtime-integrity.ts'
 import { DesktopBrowserGuests } from './browser-guests.ts'
 import { installDesktopShortcuts } from './keyboard.ts'
 import { DesktopUpdateOverlays } from './update-overlay.ts'
@@ -494,6 +495,24 @@ async function main(): Promise<void> {
   }
   // Copy comes from the same locale as the update prompts so the dialog
   // chrome and its content never mix languages.
+  /** Stop for installed files that do not match the runtime's sealed inventory. */
+  const reportRuntimeIntegrityFailure = (path: string | undefined): void => {
+    if (quitting) return
+    const messages = locale.messages
+    try {
+      dialog.showMessageBoxSync({
+        type: 'error',
+        title: messages.runtimeIntegrityTitle,
+        message: messages.runtimeIntegrityMessage,
+        ...(path === undefined ? {} : { detail: formatDesktopMessage(messages.runtimeIntegrityDetail, { path }) }),
+        buttons: [messages.quit],
+        noLink: true,
+      })
+    } catch (error) {
+      console.error(error)
+    }
+    quitWithoutConfirmation()
+  }
   const showAbout = async (): Promise<void> => {
     await ordinaryMessageBox({ type: 'info', title: locale.messages.aboutMenu, message: locale.messages.aboutProduct,
       detail: formatDesktopMessage(locale.messages.aboutVersion, { version: app.getVersion() }),
@@ -1455,7 +1474,32 @@ async function main(): Promise<void> {
     }).catch((error: unknown) => { console.error(error); if (!quitting && !shellInstallerOwnsQuit) finishQuit() })
   })
 
+  // Critical entries must match before any window exists; the whole tree is
+  // verified in the background so a damaged runtime still fails closed without
+  // delaying the first paint.
+  if (app.isPackaged) {
+    try {
+      verifyCriticalRuntime(resources.dsh)
+    } catch (error) {
+      console.error(error)
+      reportRuntimeIntegrityFailure(error instanceof RuntimeIntegrityError ? error.path : undefined)
+      return
+    }
+  }
   mainWindow = createMainWindow()
+  if (app.isPackaged) {
+    void verifyRuntimeInBackground({
+      root: resources.dsh,
+      recordDirectory: join(app.getPath('userData'), 'cache'),
+      onFailure: (report) => {
+        console.error(`desktop runtime integrity: ${report.message ?? 'verification failed'}`)
+        updateJournal?.action('runtime-integrity-failed')
+        reportRuntimeIntegrityFailure(report.path)
+      },
+    }).then((report) => {
+      if (report.ok) updateJournal?.action('runtime-integrity-ok')
+    }).catch((error: unknown) => { console.error(error) })
+  }
   if (typeof manifest !== 'object' || manifest === null) throw new Error('desktop policy: invalid application manifest')
   const developmentPolicy = app.isPackaged ? undefined : process.env.DSH_DESKTOP_MANDATORY_UPDATE_CONFIG
   const policyInput: unknown = app.isPackaged
