@@ -86,6 +86,10 @@ export const SESSION_QUERY_SQLITE_SNIPPET_CHARS = 240
 // One transient source change gets a retry; repeated churn fails rather than monopolizing the queue.
 const STABLE_OBSERVATION_ATTEMPTS = 2
 
+// Between warm batches the serialized queue is released, so a search that
+// arrives mid-build runs before the next batch.
+const WARM_IDLE_MS = 50
+
 /** SQLite module/handle opening phase; `never` disables full-text search entirely. */
 export type OpenAt = 'startup' | 'first-search' | 'never'
 
@@ -105,6 +109,34 @@ export interface Config extends SessionQueryConfig {
    * never imported or opened. Defaults to `startup`.
    */
   openAt?: OpenAt
+  /**
+   * Build and refresh the index in the background after the database opens,
+   * a bounded batch of changed sessions at a time, so the first search does
+   * not pay for the whole history. Searches stay correct regardless: any
+   * still-unindexed session is read synchronously by the search itself.
+   * Ignored under `openAt: never`. Defaults to `false`.
+   */
+  warmup?: boolean
+  /** Delay before the first warm batch, giving activation and the first paint the disk. Defaults to 3000. */
+  warmupDelayMs?: number
+  /** Changed sessions read per warm batch; each batch releases the search queue. Defaults to 25. */
+  warmupBatchSize?: number
+  /**
+   * Events per source (persisted index, live overlay) that exact ranking
+   * considers, chosen by BM25. The FTS5 early-limit path makes this cheap;
+   * raising it trades latency for depth on very broad queries. Must be a
+   * positive safe integer; defaults to 400.
+   */
+  candidateWindow?: number
+  /**
+   * Reuse the source observation of a search this recent instead of listing
+   * persisted snapshots and re-reading live logs on every call. `0` observes
+   * on every search (the historical behavior). A positive value trades at
+   * most that many milliseconds of freshness for interactive latency: new
+   * messages and newly closed sessions become visible no later than the
+   * interval after their write. Defaults to 0.
+   */
+  reconcileIntervalMs?: number
   /** SQLite journal mode. Defaults to `wal`. */
   journalMode?: JournalMode
   /** Page size when a request omits `limit`. At most `Number.MAX_SAFE_INTEGER - 1`; defaults to 20. */
@@ -119,9 +151,20 @@ export interface Config extends SessionQueryConfig {
   preparedSessionCacheSize?: number
 }
 
+/** Candidate-window settings shared by the session and event scopes. */
+interface SelectedWindow {
+  candidateWindow: number
+  sessionId?: SessionId
+}
+
 interface ResolvedConfig {
   path: string
   openAt: OpenAt
+  warmup: boolean
+  warmupDelayMs: number
+  warmupBatchSize: number
+  reconcileIntervalMs: number
+  candidateWindow: number
   journalMode: JournalMode
   defaultLimit: number
   maxLimit: number
@@ -207,6 +250,11 @@ export class SqliteSessionQueryEngine extends SessionQueryEngine {
   static Config: z<Config> = z.object({
     path: z.string().required(),
     openAt: z.union(['startup', 'first-search', 'never'] as const).default('startup'),
+    warmup: z.boolean().default(false),
+    warmupDelayMs: z.number().step(1).min(0).default(3000),
+    warmupBatchSize: z.number().step(1).min(1).default(25),
+    reconcileIntervalMs: z.number().step(1).min(0).default(0),
+    candidateWindow: z.number().step(1).min(1).default(400),
     journalMode: z.union(['wal', 'delete', 'truncate', 'persist'] as const).default('wal'),
     defaultLimit: z.number().step(1).min(1).max(SQLITE_MAX_PAGE_LIMIT).default(SESSION_QUERY_SQLITE_DEFAULT_LIMIT),
     maxLimit: z.number().step(1).min(1).max(SQLITE_MAX_PAGE_LIMIT).default(SESSION_QUERY_SQLITE_MAX_LIMIT),
@@ -238,6 +286,10 @@ export class SqliteSessionQueryEngine extends SessionQueryEngine {
   private _tail: Promise<void> = Promise.resolve()
   private _closed = false
   private _closePromise: Promise<void> | undefined
+  private readonly _warmAbort = new AbortController()
+  private _warm: Promise<void> | undefined
+  private _observedBinding: PersistenceBinding | undefined
+  private _observedAt = 0
   private readonly _optionalPersistenceFiber: Fiber
 
   constructor(ctx: Context, config: Config) {
@@ -275,7 +327,7 @@ export class SqliteSessionQueryEngine extends SessionQueryEngine {
     const signal = exec?.signal
     return this._serialized(signal, async () => {
       await this._ensureReady(signal)
-      const persistenceBinding = await this._reconcile(signal)
+      const persistenceBinding = await this._observe(signal)
       assertNotAborted(signal)
       const generation = String(this._globalGeneration)
       const fingerprint = requestFingerprint(normalized)
@@ -303,7 +355,7 @@ export class SqliteSessionQueryEngine extends SessionQueryEngine {
     const signal = exec?.signal
     return this._serialized(signal, async () => {
       await this._ensureReady(signal)
-      const persistenceBinding = await this._reconcile(signal)
+      const persistenceBinding = await this._observe(signal)
       assertNotAborted(signal)
       const target = this._targetObservation(normalized.sessionId, persistenceBinding)
       const fingerprint = requestFingerprint(normalized)
@@ -346,6 +398,8 @@ export class SqliteSessionQueryEngine extends SessionQueryEngine {
 
   private async _close(): Promise<void> {
     this._closed = true
+    this._warmAbort.abort()
+    await this._warm
     await this._tail
     if (this._ready !== undefined) {
       try {
@@ -358,6 +412,34 @@ export class SqliteSessionQueryEngine extends SessionQueryEngine {
     this._db = undefined
   }
 
+  /**
+   * Index the corpus a bounded batch at a time, yielding the serialized queue
+   * between batches so an early search only waits for the batch in flight.
+   * The loop ends at the first batch that finds nothing left to reconcile;
+   * searches still reconcile on demand, so new history never waits for this.
+   */
+  private async _warmLoop(): Promise<void> {
+    const signal = this._warmAbort.signal
+    try {
+      await abortableDelay(this.config.warmupDelayMs, signal)
+      for (;;) {
+        if (this._closed) return
+        const { indexed } = await this._serialized(
+          signal,
+          () => this._reconcile(signal, { maxLoads: this.config.warmupBatchSize }),
+        )
+        assertNotAborted(signal)
+        if (indexed === 0) return
+        await abortableDelay(WARM_IDLE_MS, signal)
+      }
+    } catch (error: unknown) {
+      // Best effort: an interrupted or failed warm pass leaves the index
+      // exactly as correct as before, and the next search reconciles fully.
+      if (isAbort(error) || this._closed) return
+      this.ctx.logger.warn(`session-search background index build stopped: ${errorMessage(error)}`)
+    }
+  }
+
   private async _open(): Promise<void> {
     this._db = await openSearchDatabase(this.config.path, this.config.journalMode)
     const state = this._db.prepare(
@@ -365,6 +447,7 @@ export class SqliteSessionQueryEngine extends SessionQueryEngine {
     ).get() as { global_generation: number }
     this._globalGeneration = state.global_generation
     this._localGeneration = state.global_generation
+    if (this.config.warmup && this.config.openAt !== 'never') this._warm = this._warmLoop()
   }
 
   private async _ensureReady(signal: AbortSignal | undefined): Promise<void> {
@@ -405,7 +488,34 @@ export class SqliteSessionQueryEngine extends SessionQueryEngine {
     }
   }
 
-  private async _reconcile(signal: AbortSignal | undefined): Promise<PersistenceBinding> {
+  /**
+   * Reconcile unless the configured freshness window still covers the last
+   * observation and the optional persistence binding has not been replaced.
+   * Within the window a search reads the index as of the previous reconcile;
+   * a binding change (mount, unmount) always forces a fresh observation.
+   * @param signal - cancellation for the source observation.
+   * @returns the persistence binding the index reflects.
+   */
+  private async _observe(signal: AbortSignal | undefined): Promise<PersistenceBinding> {
+    const cached = this._observedBinding
+    if (
+      cached !== undefined
+      && this.config.reconcileIntervalMs > 0
+      && cached === this._persistenceBinding
+      && performance.now() - this._observedAt < this.config.reconcileIntervalMs
+    ) {
+      return cached
+    }
+    const { binding } = await this._reconcile(signal)
+    this._observedBinding = binding
+    this._observedAt = performance.now()
+    return binding
+  }
+
+  private async _reconcile(
+    signal: AbortSignal | undefined,
+    options?: { maxLoads?: number },
+  ): Promise<{ binding: PersistenceBinding; indexed: number }> {
     assertNotAborted(signal)
     const db = this._requireDb()
     const persistedRows = db.prepare(
@@ -416,7 +526,11 @@ export class SqliteSessionQueryEngine extends SessionQueryEngine {
     ).all() as unknown as IndexedLiveRow[]
     const persistedById = new Map(persistedRows.map(row => [row.id as SessionId, row]))
     const liveById = new Map(liveRows.map(row => [row.id as SessionId, row]))
-    const observation = await this._observeStable(persistedById, signal)
+    const observation = await this._observeStable(
+      persistedById,
+      signal,
+      options?.maxLoads ?? Number.POSITIVE_INFINITY,
+    )
     assertNotAborted(signal)
     const persistentChanges = observation.persistenceBinding.service === undefined
       ? []
@@ -490,14 +604,19 @@ export class SqliteSessionQueryEngine extends SessionQueryEngine {
     if (pointerChanged) this._persistenceEpoch += 1
     this._localGeneration = nextLocalGeneration
     this._lastPersistenceIdentity = observation.persistenceBinding.identity
-    return observation.persistenceBinding
+    return {
+      binding: observation.persistenceBinding,
+      indexed: persistentChanges.length + liveChanges.length,
+    }
   }
 
   private async _observeStable(
     indexed: ReadonlyMap<SessionId, IndexedPersistedRow>,
     signal: AbortSignal | undefined,
+    maxLoads: number,
   ): Promise<Observation> {
     for (let attempt = 0; attempt < STABLE_OBSERVATION_ATTEMPTS; attempt += 1) {
+      let loads = 0
       assertNotAborted(signal)
       const persistenceBinding = this._persistenceBinding
       const persistence = persistenceBinding.service
@@ -519,6 +638,8 @@ export class SqliteSessionQueryEngine extends SessionQueryEngine {
             // the live-membership retry below makes the returned observation
             // live-preferred.
             if (initiallyLive.has(entry.header.id) || this.ctx.sessions.get(entry.header.id) !== undefined) continue
+            if (loads >= maxLoads) continue
+            loads += 1
             assertNotAborted(signal)
             const loaded = await readColdSessionLog(persistence, entry.header.id, signal)
             assertNotAborted(signal)
@@ -526,10 +647,15 @@ export class SqliteSessionQueryEngine extends SessionQueryEngine {
             entry.loaded = observeSession(loaded.header, loaded.inheritedEventCount, loaded.events)
           }
           assertNotAborted(signal)
-          const afterSnapshots = await persistence.list(listOptions)
-          assertNotAborted(signal)
-          const after = materializePersistenceSnapshots(afterSnapshots)
-          if (!samePersistenceSnapshots(persisted, after)) continue
+          // With no cold read in flight there is no snapshot a writer could
+          // have split in half, so the confirming second list is unnecessary:
+          // changed revisions are picked up by the next observation.
+          if (loads > 0) {
+            const afterSnapshots = await persistence.list(listOptions)
+            assertNotAborted(signal)
+            const after = materializePersistenceSnapshots(afterSnapshots)
+            if (!samePersistenceSnapshots(persisted, after)) continue
+          }
           if (this._persistenceBinding !== persistenceBinding) continue
         } catch (error: unknown) {
           if (isAbort(error) || signal?.aborted) {
@@ -652,13 +778,13 @@ export class SqliteSessionQueryEngine extends SessionQueryEngine {
     offset: number,
     persistenceBinding: PersistenceBinding,
   ): SearchRow[] {
-    const selected = selectedDocumentsSql()
+    const selected = selectedDocumentsSql(this.config.candidateWindow)
     const sessionWhere = buildSessionWhere(request.sessionFilters)
     const eventWhere = buildEventWhere(request.eventFilters)
     assertFts5OuterPredicateCount(sessionWhere.predicateCount + eventWhere.predicateCount)
     const where = [sessionWhere.sql, eventWhere.sql].filter(Boolean).join(' AND ')
     const bindings = [
-      ...selectedDocumentsParams(request.query, persistenceBinding.service !== undefined),
+      ...selectedDocumentsParams(request.query, persistenceBinding.service !== undefined, selected.window),
       ...sessionWhere.params,
       ...eventWhere.params,
       request.limit + 1,
@@ -689,12 +815,12 @@ export class SqliteSessionQueryEngine extends SessionQueryEngine {
     offset: number,
     persistenceBinding: PersistenceBinding,
   ): SearchRow[] {
-    const selected = selectedDocumentsSql()
+    const selected = selectedDocumentsSql(this.config.candidateWindow, request.sessionId)
     const eventWhere = buildEventWhere(request.filters)
     assertFts5OuterPredicateCount(1 + eventWhere.predicateCount)
     const where = ['session_id = ?', eventWhere.sql].filter(Boolean).join(' AND ')
     const bindings = [
-      ...selectedDocumentsParams(request.query, persistenceBinding.service !== undefined),
+      ...selectedDocumentsParams(request.query, persistenceBinding.service !== undefined, selected.window),
       request.sessionId,
       ...eventWhere.params,
       request.limit + 1,
@@ -797,11 +923,57 @@ function headerBindings(
   ]
 }
 
-function selectedDocumentsSql(): { sql: string } {
+function selectedDocumentsSql(
+  candidateWindow: number,
+  sessionId?: SessionId,
+): { sql: string; window: SelectedWindow } {
+  // Each source contributes its BM25-leading events; exact match-count
+  // ranking runs over that candidate set. Two steps keep a broad query cheap:
+  // the window selects rowids only, so FTS5 can stop after LIMIT rows, and the
+  // fetch that follows highlights just those rows. Ranking every match would
+  // read and highlight the text of thousands of events, which costs seconds
+  // on large histories.
+  const scope = sessionId === undefined ? '' : ' AND session_id = ?'
   return {
-    sql: `WITH candidates AS (
+    sql: `WITH persisted_window AS (
+      SELECT rowid AS rid FROM persisted_docs
+      WHERE persisted_docs MATCH ?${scope}
+      ORDER BY bm25(persisted_docs)
+      LIMIT ?
+    ), live_window AS (
+      SELECT rowid AS rid FROM temp.live_docs
+      WHERE live_docs MATCH ?${scope}
+      ORDER BY bm25(live_docs)
+      LIMIT ?
+    ), persisted_hits AS (
       SELECT
-        pd.session_id AS session_id,
+        rowid AS rid,
+        session_id AS session_id,
+        CAST(seq AS INTEGER) AS seq,
+        type AS type,
+        CAST(time AS INTEGER) AS time,
+        surface AS surface,
+        highlight(persisted_docs, 0, ?, ?) AS marked_text,
+        CAST(codepoint_length AS INTEGER) AS document_length
+      FROM persisted_docs
+      WHERE persisted_docs MATCH ?${scope}
+        AND rowid IN (SELECT rid FROM persisted_window)
+    ), live_hits AS (
+      SELECT
+        rowid AS rid,
+        session_id AS session_id,
+        CAST(seq AS INTEGER) AS seq,
+        type AS type,
+        CAST(time AS INTEGER) AS time,
+        surface AS surface,
+        highlight(live_docs, 0, ?, ?) AS marked_text,
+        CAST(codepoint_length AS INTEGER) AS document_length
+      FROM temp.live_docs
+      WHERE live_docs MATCH ?${scope}
+        AND rowid IN (SELECT rid FROM live_window)
+    ), candidates AS MATERIALIZED (
+      SELECT
+        ph.session_id AS session_id,
         ps.version AS version,
         ps.created_at AS created_at,
         ps.cwd AS cwd,
@@ -811,20 +983,19 @@ function selectedDocumentsSql(): { sql: string } {
         ps.agent_preset AS agent_preset,
         0 AS live,
         1 AS persisted,
-        CAST(pd.seq AS INTEGER) AS seq,
-        pd.type AS type,
-        CAST(pd.time AS INTEGER) AS time,
-        pd.surface AS surface,
-        highlight(persisted_docs, 0, ?, ?) AS marked_text,
-        CAST(pd.codepoint_length AS INTEGER) AS document_length
-      FROM persisted_docs AS pd
-      JOIN persisted_sessions AS ps ON ps.id = pd.session_id
-      WHERE persisted_docs MATCH ?
-        AND ? = 1
-        AND NOT EXISTS (SELECT 1 FROM temp.live_sessions AS ls WHERE ls.id = pd.session_id)
+        ph.seq AS seq,
+        ph.type AS type,
+        ph.time AS time,
+        ph.surface AS surface,
+        ph.marked_text AS marked_text,
+        ph.document_length AS document_length
+      FROM persisted_hits AS ph
+      JOIN persisted_sessions AS ps ON ps.id = ph.session_id
+      WHERE ? = 1
+        AND NOT EXISTS (SELECT 1 FROM temp.live_sessions AS ls WHERE ls.id = ph.session_id)
       UNION ALL
       SELECT
-        ld.session_id AS session_id,
+        lh.session_id AS session_id,
         ls.version AS version,
         ls.created_at AS created_at,
         ls.cwd AS cwd,
@@ -834,15 +1005,14 @@ function selectedDocumentsSql(): { sql: string } {
         ls.agent_preset AS agent_preset,
         1 AS live,
         CASE WHEN ? = 1 THEN ls.persisted ELSE 0 END AS persisted,
-        CAST(ld.seq AS INTEGER) AS seq,
-        ld.type AS type,
-        CAST(ld.time AS INTEGER) AS time,
-        ld.surface AS surface,
-        highlight(live_docs, 0, ?, ?) AS marked_text,
-        CAST(ld.codepoint_length AS INTEGER) AS document_length
-      FROM temp.live_docs AS ld
-      JOIN temp.live_sessions AS ls ON ls.id = ld.session_id
-      WHERE live_docs MATCH ?
+        lh.seq AS seq,
+        lh.type AS type,
+        lh.time AS time,
+        lh.surface AS surface,
+        lh.marked_text AS marked_text,
+        lh.document_length AS document_length
+      FROM live_hits AS lh
+      JOIN temp.live_sessions AS ls ON ls.id = lh.session_id
     ), matched AS (
       SELECT *,
         (
@@ -851,23 +1021,37 @@ function selectedDocumentsSql(): { sql: string } {
         ) / ? AS match_count
       FROM candidates
     )`,
+    window: sessionId === undefined ? { candidateWindow } : { candidateWindow, sessionId },
   }
 }
 
-function selectedDocumentsParams(query: string, persistenceVisible: boolean): Array<string | number> {
+function selectedDocumentsParams(
+  query: string,
+  persistenceVisible: boolean,
+  window: SelectedWindow,
+): Array<string | number> {
   // A CJK query matches the bigram column instead of one unsegmentable phrase;
   // an ASCII query keeps the single-phrase semantics it always had.
   const expression = hasCjk(query) ? cjkQuery(query) : quoteFtsData(query)
   const visible = persistenceVisible ? 1 : 0
+  const scoped = window.sessionId === undefined ? [] : [window.sessionId]
   return [
+    expression,
+    ...scoped,
+    window.candidateWindow,
+    expression,
+    ...scoped,
+    window.candidateWindow,
     FTS_HIGHLIGHT_START,
     FTS_HIGHLIGHT_END,
     expression,
-    visible,
-    visible,
+    ...scoped,
     FTS_HIGHLIGHT_START,
     FTS_HIGHLIGHT_END,
     expression,
+    ...scoped,
+    visible,
+    visible,
     FTS_HIGHLIGHT_START,
     Buffer.byteLength(FTS_HIGHLIGHT_START, 'utf8'),
   ]
@@ -1025,6 +1209,11 @@ function resolveConfig(config: Config): ResolvedConfig {
   const resolved: ResolvedConfig = {
     path: config.path,
     openAt: config.openAt ?? 'startup',
+    warmup: config.warmup ?? false,
+    warmupDelayMs: config.warmupDelayMs ?? 3000,
+    warmupBatchSize: config.warmupBatchSize ?? 25,
+    reconcileIntervalMs: config.reconcileIntervalMs ?? 0,
+    candidateWindow: config.candidateWindow ?? 400,
     journalMode: config.journalMode ?? 'wal',
     defaultLimit: config.defaultLimit ?? SESSION_QUERY_SQLITE_DEFAULT_LIMIT,
     maxLimit: config.maxLimit ?? SESSION_QUERY_SQLITE_MAX_LIMIT,
@@ -1040,6 +1229,31 @@ function resolveConfig(config: Config): ResolvedConfig {
   }
   const openPhases: readonly string[] = ['startup', 'first-search', 'never']
   if (!openPhases.includes(resolved.openAt)) throw invalidConfig('openAt is not supported')
+  if (typeof resolved.warmup !== 'boolean') throw invalidConfig('warmup must be a boolean')
+  if (
+    !Number.isSafeInteger(resolved.warmupDelayMs)
+    || resolved.warmupDelayMs < 0
+  ) {
+    throw invalidConfig('warmupDelayMs must be a non-negative safe integer')
+  }
+  if (
+    !Number.isSafeInteger(resolved.warmupBatchSize)
+    || resolved.warmupBatchSize < 1
+  ) {
+    throw invalidConfig('warmupBatchSize must be a positive safe integer')
+  }
+  if (
+    !Number.isSafeInteger(resolved.reconcileIntervalMs)
+    || resolved.reconcileIntervalMs < 0
+  ) {
+    throw invalidConfig('reconcileIntervalMs must be a non-negative safe integer')
+  }
+  if (
+    !Number.isSafeInteger(resolved.candidateWindow)
+    || resolved.candidateWindow < 1
+  ) {
+    throw invalidConfig('candidateWindow must be a positive safe integer')
+  }
   assertPageLimit('defaultLimit', resolved.defaultLimit)
   assertPageLimit('maxLimit', resolved.maxLimit)
   assertPositiveInteger('snippetChars', resolved.snippetChars)
@@ -1091,6 +1305,31 @@ function assertNotAborted(signal: AbortSignal | undefined): void {
   if (signal?.aborted) {
     throw new SessionQueryError('session-search aborted', 'SESSION_QUERY_ABORTED')
   }
+}
+
+/**
+ * Wait for a delay, clearing the timer on abort so a disposed index never
+ * keeps the process alive for a pending wakeup.
+ * @param ms - delay length in milliseconds.
+ * @param signal - cancellation for the wait.
+ * @returns a promise settled after the delay, or rejected on abort.
+ */
+function abortableDelay(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      signal.removeEventListener('abort', onAbort)
+      resolve()
+    }, ms)
+    const onAbort = (): void => {
+      clearTimeout(timer)
+      reject(new SessionQueryError('session-search aborted', 'SESSION_QUERY_ABORTED'))
+    }
+    if (signal.aborted) {
+      onAbort()
+      return
+    }
+    signal.addEventListener('abort', onAbort, { once: true })
+  })
 }
 
 function waitWithAbort<T>(promise: Promise<T>, signal: AbortSignal | undefined): Promise<T> {

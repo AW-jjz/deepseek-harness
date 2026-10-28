@@ -888,7 +888,12 @@ function SearchResults({
           </div>
         )}
         {!pending && results.items.length === 0 && (
-          <div className={css.empty}>{t('search.noMatches')}</div>
+          <div className={css.empty}>
+            {t('search.noMatches')}
+            {Array.from(query.trim()).length <= 2 && (
+              <div className={css.emptyHint}>{t('search.shortQueryHint')}</div>
+            )}
+          </div>
         )}
         {results.hasMore && (
           <div className={css.searchStatus}>

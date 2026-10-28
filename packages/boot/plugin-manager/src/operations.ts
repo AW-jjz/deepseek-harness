@@ -302,6 +302,15 @@ async function pruneOperationLogs(logRoot: string): Promise<void> {
     .map(entry => rm(join(logRoot, entry.name), { recursive: true, force: true })))
 }
 
+/**
+ * Run one pnpm command inside a profile directory under the plugin manager's
+ * operation log, refusing while a recorded run is still active and restoring
+ * the profile manifest and lockfile if the run fails.
+ * @param context - profile location and options for the command.
+ * @param args - pnpm arguments after the binary name.
+ * @param options - execution mode, output bound, and output observer.
+ * @returns the exit code, bounded output, and the operation log path.
+ */
 export async function runProfilePnpm(
   context: PackageOperationContext, args: readonly string[], options: PackageOperationOptions,
 ): Promise<PackageResult> {

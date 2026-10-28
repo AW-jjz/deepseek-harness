@@ -245,7 +245,7 @@ export interface Config {
 ## `@deepseek-ai/dsh-api-session-controller`
 
 - `inject`: `agentDefaultModel` · `agents` · `attachments` · `fileUploads` · `fs` · `llm` · `remoteAccess` · `sessions` · `sessionProjections` · `sessionQuery` · `typert` · `workspaceRegistry`
-- `source`: [`packages/api/session-controller/src/index.ts:110`](../packages/api/session-controller/src/index.ts)
+- `source`: [`packages/api/session-controller/src/index.ts:115`](../packages/api/session-controller/src/index.ts)
 
 ```ts config-catalog
 /** Session Controller deployment policy. */
@@ -2920,7 +2920,7 @@ export type SessionLogCompressionLevel = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9
 
 ## `@deepseek-ai/dsh-session-persistence-jsonl`
 
-- `source`: [`packages/session/session-persistence-jsonl/src/index.ts:94`](../packages/session/session-persistence-jsonl/src/index.ts)
+- `source`: [`packages/session/session-persistence-jsonl/src/index.ts:103`](../packages/session/session-persistence-jsonl/src/index.ts)
 
 ```ts config-catalog
 /** Plugin config for the JSONL backend's root, physical encoding, and listing concurrency. */
@@ -2980,7 +2980,7 @@ export interface Config {
 
 - `inject`: `sessions`
 - `refs`: [`SessionQueryConfig`](../packages/session-query/session-query/src/index.ts)
-- `source`: [`packages/session-query/session-query-sqlite/src/index.ts:92`](../packages/session-query/session-query-sqlite/src/index.ts)
+- `source`: [`packages/session-query/session-query-sqlite/src/index.ts:97`](../packages/session-query/session-query-sqlite/src/index.ts)
 
 ```ts config-catalog
 /** Combined session-query configuration backed by SQLite full-text search. */
@@ -2999,6 +2999,34 @@ export interface Config extends SessionQueryConfig {
    * never imported or opened. Defaults to `startup`.
    */
   openAt?: OpenAt
+  /**
+   * Build and refresh the index in the background after the database opens,
+   * a bounded batch of changed sessions at a time, so the first search does
+   * not pay for the whole history. Searches stay correct regardless: any
+   * still-unindexed session is read synchronously by the search itself.
+   * Ignored under `openAt: never`. Defaults to `false`.
+   */
+  warmup?: boolean
+  /** Delay before the first warm batch, giving activation and the first paint the disk. Defaults to 3000. */
+  warmupDelayMs?: number
+  /** Changed sessions read per warm batch; each batch releases the search queue. Defaults to 25. */
+  warmupBatchSize?: number
+  /**
+   * Events per source (persisted index, live overlay) that exact ranking
+   * considers, chosen by BM25. The FTS5 early-limit path makes this cheap;
+   * raising it trades latency for depth on very broad queries. Must be a
+   * positive safe integer; defaults to 400.
+   */
+  candidateWindow?: number
+  /**
+   * Reuse the source observation of a search this recent instead of listing
+   * persisted snapshots and re-reading live logs on every call. `0` observes
+   * on every search (the historical behavior). A positive value trades at
+   * most that many milliseconds of freshness for interactive latency: new
+   * messages and newly closed sessions become visible no later than the
+   * interval after their write. Defaults to 0.
+   */
+  reconcileIntervalMs?: number
   /** SQLite journal mode. Defaults to `wal`. */
   journalMode?: JournalMode
   /** Page size when a request omits `limit`. At most `Number.MAX_SAFE_INTEGER - 1`; defaults to 20. */
@@ -4731,6 +4759,7 @@ export interface Config {
 | `@deepseek-ai/dsh-client-ui-creation-recommendations` | — | [`packages/experimental/client-ui-creation-recommendations/src/index.ts`](../packages/experimental/client-ui-creation-recommendations/src/index.ts) |
 | `@deepseek-ai/dsh-client-ui-deepseek-model-label-1017` | — | [`packages/client/ui-deepseek-model-label-1017/src/index.ts`](../packages/client/ui-deepseek-model-label-1017/src/index.ts) |
 | `@deepseek-ai/dsh-client-ui-deliverables` | `connection` · `sessionQuery` · `sessionController` · `workspaceFiles` · `fs` · `sandboxPolicy` · `workspaceChanges` | [`packages/client/ui-deliverables/src/index.ts`](../packages/client/ui-deliverables/src/index.ts) |
+| `@deepseek-ai/dsh-client-ui-desktop-notice` | — | [`packages/client/ui-desktop-notice/src/index.ts`](../packages/client/ui-desktop-notice/src/index.ts) |
 | `@deepseek-ai/dsh-client-ui-directory-picker-browse` | — | [`packages/client/ui-directory-picker-browse/src/index.ts`](../packages/client/ui-directory-picker-browse/src/index.ts) |
 | `@deepseek-ai/dsh-client-ui-directory-picker-native` | — | [`packages/client/ui-directory-picker-native/src/index.ts`](../packages/client/ui-directory-picker-native/src/index.ts) |
 | `@deepseek-ai/dsh-client-ui-entry-customization` | — | [`packages/client/ui-entry-customization/src/index.ts`](../packages/client/ui-entry-customization/src/index.ts) |

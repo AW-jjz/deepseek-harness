@@ -9,7 +9,7 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-Use this package to add ranked SQLite FTS5 search across session history, either across sessions or within one session, with cursor pagination. It indexes live and persisted history in a separate derived database, so searches reflect current state without modifying the session-persistence store. Exact reads, filters, and traces remain available through the same query API. Search is opt-in in shipped compositions; configure `openAt` to open the index at startup, on first search, or never. Results match tokens and phrases rather than arbitrary substrings, and each index path has a single process owner.
+Use this package to add ranked SQLite FTS5 search across session history, either across sessions or within one session, with cursor pagination. It indexes live and persisted history in a separate derived database, so searches reflect current state without modifying the session-persistence store. Exact reads, filters, and traces remain available through the same query API. The shared base leaves content search off; the Web surface, and therefore Desktop, enables one durable index with background warmup. Configure `openAt` to open the index at startup, on first search, or never. Results match tokens and phrases rather than arbitrary substrings, and each index path has a single process owner.
 
 ## Table of Contents
 
@@ -44,6 +44,11 @@ Choose it when you want full-text recall over prior sessions with ranking and pa
 |---|---|---|
 | `path` | required | Dedicated derived-index SQLite path, or `:memory:`; missing paths are created owner-only on POSIX |
 | `openAt` | `startup` | `startup` opens at activation; `first-search` defers the SQLite module until the first search; `never` disables full-text search while inherited reads stay available |
+| `warmup` | `false` | Build and refresh the index in the background after the database opens, a bounded batch of changed sessions at a time |
+| `warmupDelayMs` | `3000` | Delay before the first warm batch |
+| `warmupBatchSize` | `25` | Changed sessions read per warm batch; each batch releases the search queue |
+| `reconcileIntervalMs` | `0` | Reuse one source observation for this long; `0` observes on every search |
+| `candidateWindow` | `400` | BM25-leading events per source that exact ranking considers |
 | `journalMode` | `wal` | `wal`, `delete`, `truncate`, or `persist` |
 | `defaultLimit` | `20` | Page size when a request omits `limit` |
 | `maxLimit` | `100` | Largest accepted request page size |
@@ -58,13 +63,21 @@ The generated [configuration catalog](../../../docs/config-catalog.md#deepseek-a
 
 `searchSessions` searches the whole corpus and groups results by each session's strongest matching event; `searchEvents` searches one logical session. Queries are literal phrases: they are trimmed and whitespace-normalized, and FTS5 syntax such as quotes, `OR`, `NEAR`, and `*` is treated as data, never as executable query syntax. Metadata filters (session id, cwd, created-at, parent, availability, event seq/time/type/surface) narrow results before ranking. All `current`, `shadowed`, and `log-only` events are searchable by default; pass a surface filter to narrow.
 
-Ranking is deterministic: more actual FTS5 highlighted-match spans first, then shorter documents, with event time, session id, and seq breaking ties. Results carry plain-text snippets bounded by `snippetChars` Unicode code points, with no provider-specific numeric score. Pages continue through an opaque `SessionSearchCursor` bound to the exact normalized request; a cursor becomes stale when its relevant corpus changes (`SESSION_QUERY_STALE_CURSOR`), and a within-session cursor survives changes to unrelated sessions while a cross-session cursor does not.
+Ranking is deterministic: more actual FTS5 highlighted-match spans first, then shorter documents, with event time, session id, and seq breaking ties. A query that matches more events than `candidateWindow` in one source first narrows to that source's BM25-leading window and then applies the same exact order; below the window nothing is dropped. Results carry plain-text snippets bounded by `snippetChars` Unicode code points, with no provider-specific numeric score. Pages continue through an opaque `SessionSearchCursor` bound to the exact normalized request; a cursor becomes stale when its relevant corpus changes (`SESSION_QUERY_STALE_CURSOR`), and a within-session cursor survives changes to unrelated sessions while a cross-session cursor does not.
 
 The `unicode61` tokenizer matches tokens and phrases, not arbitrary substrings: `AI` does not match the token `BRAID`. Chinese, Japanese, and Korean text has no separator for the tokenizer to split on, so the index carries a second column of CJK unigrams and adjacent bigrams; a query's CJK runs are rewritten into the same terms, which makes 磁盘 match inside 检查磁盘空间 while a longer phrase requires every adjacent pair. An ASCII query keeps its single-phrase semantics, and a CJK result shows the head of its text as the snippet because the display column marks no characters for those terms. Use `ctx.sessionQuery.filterEvents()` with a `text` clause when a literal whitespace-flexible substring scan is required.
 
 ### When to defer or disable search
 
 With `openAt: first-search`, the service activates without importing `node:sqlite` or opening the index, deferring SQLite's experimental warning until the first actual search; an invalid database fails that first search instead of service activation. With `openAt: never`, full-text search is off for the deployment: `searchSessions` and `searchEvents` fail with `SESSION_QUERY_SEARCH_DISABLED` before any request normalization, while every inherited exact read, filter, and trace keeps working. Requests that exceed the compiled-predicate budget (14 combined predicates across sessions, 13 within a session) or SQLite's portable 32,766-binding limit fail with `SESSION_QUERY_INVALID_FILTER` before statement preparation.
+
+### Durable index, freshness, and broad queries
+
+`warmup: true` keeps one durable index across restarts without making the first search pay for the whole history. After the database opens the service waits `warmupDelayMs`, then reconciles at most `warmupBatchSize` changed persisted sessions per batch, releasing the search queue between batches so a search that arrives mid-build runs first. A batch that finds nothing left ends the loop, and the next search reconciles whatever changed since. Warmup never weakens correctness: any search still reconciles the full difference itself, so a query issued mid-build returns the whole corpus.
+
+`reconcileIntervalMs` reuses one source observation for that many milliseconds, so interactive typing does not relist the store on every keystroke; writes become visible no later than the interval after they happen. Steady-state observation lists the store once, because a listing with no cold reads has no split snapshot to confirm.
+
+Measured on a 189 MB, 327-session copy of a real history store on an external USB SSD: a cold first search built the index in 336 s; a background warmup built it in 342 s (a 485 MB derived database) and a restart reused it with a first query of about 170-200 ms. With `candidateWindow: 200` and `reconcileIntervalMs: 2000`, Chinese two-character queries measured 169 ms P95 while typing and 202 ms P95 when every query paid a fresh source observation, always returning a full page. The index is derived data: deleting the file only costs the next build.
 
 ### Failures and recovery
 

@@ -29,7 +29,7 @@ In **Plugins → Add plugin**, enter `@deepseek-ai/dsh-experimental-session-sear
 
 With HMR enabled, enabling or disabling the bundle registers or removes its global tools in the running Host, so every Agent sees the change on its next request, in every preset including minimal.
 
-This bundle enables Agent search tools. Sidebar search keeps its existing behavior.
+This bundle enables Agent search tools. The sidebar's own content search is independent of this bundle.
 
 -----
 

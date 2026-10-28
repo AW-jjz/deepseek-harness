@@ -1555,6 +1555,29 @@ describe('WorkspaceBrowser', () => {
     }
   })
 
+  it('hints that short terms may miss when an empty content search finishes', async () => {
+    vi.useFakeTimers()
+    try {
+      mount({
+        useSessions: hook(sessionState([summary('only', 1)])),
+        useWorkspaces: hook(workspaceState([workspace('root', ['only'], 'Root')])),
+        searchSessions: vi.fn(async () => ({ items: [], hasMore: false })),
+      })
+      const input = screen.getByPlaceholderText<HTMLInputElement>('搜索会话名称')
+      fireEvent.change(input, { target: { value: '磁盘' } })
+      await act(async () => { await vi.advanceTimersByTimeAsync(250) })
+      expect(screen.getByText('无匹配会话')).toBeTruthy()
+      expect(screen.getByText('内容搜索按整词匹配，短词可能匹配不到，试试更长的关键词。')).toBeTruthy()
+
+      fireEvent.change(input, { target: { value: '磁盘空间不足' } })
+      await act(async () => { await vi.advanceTimersByTimeAsync(250) })
+      expect(screen.getByText('无匹配会话')).toBeTruthy()
+      expect(screen.queryByText('内容搜索按整词匹配，短词可能匹配不到，试试更长的关键词。')).toBeNull()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('waits for authoritative Workspace membership before revealing a grouped search result', async () => {
     const sessions = sessionState([
       summary('newest-1', 6),

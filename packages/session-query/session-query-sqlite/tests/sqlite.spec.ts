@@ -215,6 +215,9 @@ describe('SQLite session search', () => {
   it('defaults and validates opening policy and persisted inspection concurrency through its Cordis config', async () => {
     const defaultCtx = await liveContext()
     expect((defaultCtx.sessionQuery as SqliteSessionQueryEngine).config.openAt).toBe('startup')
+    expect((defaultCtx.sessionQuery as SqliteSessionQueryEngine).config.warmup).toBe(false)
+    expect((defaultCtx.sessionQuery as SqliteSessionQueryEngine).config.reconcileIntervalMs).toBe(0)
+    expect((defaultCtx.sessionQuery as SqliteSessionQueryEngine).config.candidateWindow).toBe(400)
     expect((defaultCtx.sessionQuery as SqliteSessionQueryEngine).config.persistedReadConcurrency)
       .toBe(SESSION_QUERY_DEFAULT_PERSISTED_INSPECT_CONCURRENCY)
 
@@ -738,6 +741,14 @@ describe('SQLite session search', () => {
       { path: ':memory:', defaultLimit: 3, maxLimit: 2 },
       { path: ':memory:', openAt: 'later' },
       { path: ':memory:', journalMode: 'memory' },
+      { path: ':memory:', warmup: 'yes' },
+      { path: ':memory:', warmupDelayMs: -1 },
+      { path: ':memory:', warmupDelayMs: 1.5 },
+      { path: ':memory:', warmupBatchSize: 0 },
+      { path: ':memory:', reconcileIntervalMs: -1 },
+      { path: ':memory:', reconcileIntervalMs: 1.5 },
+      { path: ':memory:', candidateWindow: 0 },
+      { path: ':memory:', candidateWindow: 1.5 },
     ]) {
       const direct = new Context()
       await direct.plugin(SessionStore)
@@ -1897,5 +1908,158 @@ describe('SQLite schema, cancellation, and real persistence integration', () => 
     expect(openB).toHaveBeenCalledTimes(1)
     await searchB.dispose()
     await persistenceB.dispose()
+  })
+})
+
+/** Count durable index rows from a separate read-only connection. */
+function indexedSessions(path: string): number | undefined {
+  let db: DatabaseSync | undefined
+  try {
+    db = new DatabaseSync(path, { readOnly: true })
+    const row = db.prepare('SELECT COUNT(*) AS n FROM persisted_sessions').get() as { n: number | bigint }
+    return Number(row.n)
+  } catch {
+    return undefined
+  } finally {
+    db?.close()
+  }
+}
+
+describe('SQLite background index warmup', () => {
+  it('indexes persisted sessions before any search arrives', async () => {
+    TestPersistence.reset([
+      { meta: header('warm-a'), events: messageEvents('warm needle a') },
+      { meta: header('warm-b'), events: messageEvents('warm needle b') },
+      { meta: header('warm-c'), events: messageEvents('warm needle c') },
+    ])
+    const path = await temporaryPath('warm.db')
+    const ctx = new Context()
+    await ctx.plugin(SessionStore)
+    await ctx.plugin(SessionProjectionRegistry)
+    const persistence = await ctx.plugin(TestPersistence)
+    const mounted = await ctx.plugin(SqliteSessionQueryEngine, {
+      path,
+      warmup: true,
+      warmupDelayMs: 0,
+      warmupBatchSize: 1,
+    })
+
+    await vi.waitFor(() => {
+      expect(indexedSessions(path)).toBe(3)
+    }, { timeout: 5000 })
+    await mounted.dispose()
+    await persistence.dispose()
+  })
+
+  it('answers a search that arrives mid-build with the whole corpus', async () => {
+    TestPersistence.reset([
+      { meta: header('warm-x'), events: messageEvents('needle first') },
+      { meta: header('warm-y'), events: messageEvents('needle second') },
+      { meta: header('warm-z'), events: messageEvents('needle last') },
+    ])
+    const path = await temporaryPath('warm-search.db')
+    const ctx = new Context()
+    await ctx.plugin(SessionStore)
+    await ctx.plugin(SessionProjectionRegistry)
+    const persistence = await ctx.plugin(TestPersistence)
+    // One session per batch leaves the later sessions unindexed when the
+    // search queues, so the result proves the search itself reconciled.
+    const mounted = await ctx.plugin(SqliteSessionQueryEngine, {
+      path,
+      warmup: true,
+      warmupDelayMs: 0,
+      warmupBatchSize: 1,
+    })
+
+    const page = await ctx.sessionQuery.searchSessions({ query: 'needle' })
+    expect(page.items.map(hit => hit.header.id).sort()).toEqual([
+      SessionId('warm-x'), SessionId('warm-y'), SessionId('warm-z'),
+    ])
+    await mounted.dispose()
+    await persistence.dispose()
+  })
+
+  it('leaves no pending wakeup when disposed during the warm delay', async () => {
+    const path = await temporaryPath('warm-closed.db')
+    const ctx = new Context()
+    await ctx.plugin(SessionStore)
+    await ctx.plugin(SessionProjectionRegistry)
+    const persistence = await ctx.plugin(TestPersistence)
+    const mounted = await ctx.plugin(SqliteSessionQueryEngine, {
+      path,
+      warmup: true,
+      warmupDelayMs: 60_000,
+    })
+
+    const begun = Date.now()
+    await mounted.dispose()
+    expect(Date.now() - begun).toBeLessThan(5_000)
+    await persistence.dispose()
+  })
+})
+
+describe('SQLite reconcile freshness window', () => {
+  it('reuses an observation inside the interval and refreshes after it', async () => {
+    const durable = header('fresh')
+    TestPersistence.reset([{ meta: durable, events: messageEvents('durable needle') }])
+    const ctx = new Context()
+    await ctx.plugin(SessionStore)
+    await ctx.plugin(SessionProjectionRegistry)
+    const persistence = await ctx.plugin(TestPersistence)
+    const mounted = await ctx.plugin(SqliteSessionQueryEngine, {
+      path: ':memory:',
+      reconcileIntervalMs: 60_000,
+    })
+
+    await ctx.sessionQuery.searchSessions({ query: 'needle' })
+    const afterFirst = TestPersistence.listSignals.length
+    expect(afterFirst).toBe(2)
+    await ctx.sessionQuery.searchSessions({ query: 'needle' })
+    expect(TestPersistence.listSignals.length).toBe(afterFirst)
+
+    // A changed persisted revision stays invisible until the window elapses.
+    TestPersistence.set({ meta: durable, events: messageEvents('durable needle needle') })
+    await ctx.sessionQuery.searchSessions({ query: 'needle' })
+    expect(TestPersistence.listSignals.length).toBe(afterFirst)
+
+    // Zero disables the window: every search observes the sources again.
+    await mounted.dispose()
+    await persistence.dispose()
+    const always = new Context()
+    await always.plugin(SessionStore)
+    await always.plugin(SessionProjectionRegistry)
+    const secondPersistence = await always.plugin(TestPersistence)
+    const alwaysMounted = await always.plugin(SqliteSessionQueryEngine, { path: ':memory:' })
+    // The first search reads a changed revision (two lists); the second finds
+    // nothing to read and confirms with one list only.
+    await always.sessionQuery.searchSessions({ query: 'needle' })
+    await always.sessionQuery.searchSessions({ query: 'needle' })
+    expect(TestPersistence.listSignals.length).toBe(afterFirst + 3)
+    await alwaysMounted.dispose()
+    await secondPersistence.dispose()
+  })
+})
+
+describe('SQLite BM25 candidate window', () => {
+  it('ranks only the BM25-leading events when a query exceeds the window', async () => {
+    const ctx = await liveContext({ path: ':memory:', candidateWindow: 2, defaultLimit: 10 })
+    for (let index = 0; index < 5; index += 1) {
+      ctx.sessions.create(SessionId(`window-${index}`), {
+        seed: messageEvents(`needle ${'filler '.repeat(index * 4)}`),
+      })
+    }
+    const page = await ctx.sessionQuery.searchSessions({ query: 'needle' })
+    // Two candidates survive the window, so the page cannot exceed them.
+    expect(page.items).toHaveLength(2)
+    expect(page.nextCursor).toBeUndefined()
+  })
+
+  it('keeps every match when the corpus stays inside the window', async () => {
+    const ctx = await liveContext({ path: ':memory:', candidateWindow: 400, defaultLimit: 10 })
+    for (let index = 0; index < 5; index += 1) {
+      ctx.sessions.create(SessionId(`inside-${index}`), { seed: messageEvents('needle') })
+    }
+    const page = await ctx.sessionQuery.searchSessions({ query: 'needle' })
+    expect(page.items).toHaveLength(5)
   })
 })

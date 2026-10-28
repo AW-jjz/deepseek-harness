@@ -534,6 +534,15 @@
   font-size: 13px;
 }
 
+/* Secondary line under an empty result list: explains why a very short
+   query may miss content without implying the index is broken. */
+.emptyHint {
+  margin-top: 6px;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-label-quaternary);
+}
+
 .emptyState {
   display: flex;
   flex-direction: column;
