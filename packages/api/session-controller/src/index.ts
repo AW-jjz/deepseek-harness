@@ -487,7 +487,8 @@ export class SessionController extends TypertRemoteService {
         throw new RemoteError('session/not-found', `session "${request.sessionId}" not found`, { sessionId: request.sessionId })
       }
       if (remoteErrorOf(error) !== undefined) throw error
-      throw new RemoteError('gateway/internal', 'session removal failed', {}, { cause: error })
+      throw new RemoteError('gateway/internal', 'session removal failed',
+        { reason: error instanceof Error ? error.message : String(error) }, { cause: error })
     }
   }
 
@@ -513,7 +514,8 @@ export class SessionController extends TypertRemoteService {
         throw new RemoteError('session/not-found', `session "${request.sessionId}" has no recovery copy`, { sessionId: request.sessionId })
       }
       if (remoteErrorOf(error) !== undefined) throw error
-      throw new RemoteError('gateway/internal', 'session restore failed', {}, { cause: error })
+      throw new RemoteError('gateway/internal', 'session restore failed',
+        { reason: error instanceof Error ? error.message : String(error) }, { cause: error })
     }
   }
 
