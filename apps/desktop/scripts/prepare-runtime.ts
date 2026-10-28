@@ -13,7 +13,7 @@ import { packagingStep } from './packaging-step.mjs'
 import { preparePrimaryRuntime } from './prepare-primary-runtime.ts'
 import { prepareDesktopCli } from './prepare-cli.ts'
 import { prepareCommandLink } from './prepare-command-link.ts'
-import { verifyElectronArchive } from './electron-archive.ts'
+import { pinnedElectronArchiveSha256, verifyElectronArchive } from './electron-archive.ts'
 
 const BUILD_PATHS = resolveDesktopTargetBuildPaths()
 const RUNTIME_ROOT = BUILD_PATHS.runtime
@@ -24,8 +24,17 @@ type DesktopTarget = ReturnType<typeof desktopTargetPlatform>
 async function prepareElectron({ platform, arch }: DesktopTarget): Promise<string> {
   const require = createRequire(import.meta.url)
   const { version } = require('electron/package.json') as { version: string }
+  // The pinned digest is also the checksum source: fetching the release's
+  // SHASUMS256.txt is a network read that a cached, offline, or proxied build
+  // cannot make, and `verifyElectronArchive` below refuses any archive that
+  // differs from the same pin anyway.
+  const artifact = `electron-v${version}-${platform}-${arch}.zip`
+  const pinned = pinnedElectronArchiveSha256(version, platform, arch)
   const archive = await packagingStep(process.env.DSH_DESKTOP_PACKAGING_RUN_DIR, 'download:electron',
-    () => downloadArtifact({ version, platform, arch, artifactName: 'electron', cacheRoot: BUILD_PATHS.downloads }))
+    () => downloadArtifact({
+      version, platform, arch, artifactName: 'electron', cacheRoot: BUILD_PATHS.downloads,
+      checksums: { [artifact]: pinned },
+    }))
   // The download host verifies its own checksums; the pinned digest is what makes the runtime
   // auditable and refuses a version this repository has not reviewed.
   verifyElectronArchive(archive, version, platform, arch)
