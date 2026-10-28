@@ -469,8 +469,11 @@ export class SessionController extends TypertRemoteService {
    */
   @Remote('delete')
   async delete(request: SessionDeleteRequest, signal: AbortSignal): Promise<SessionDeleteValue> {
-    const remove = this.ctx.get('sessionPersistence')?.delete
-    if (remove === undefined) {
+    // Read through `get`: the controller does not inject the store, so a property
+    // read on `ctx` is refused before the service is reached.
+    const persistence = this.ctx.get('sessionPersistence')
+    const remove = persistence?.delete
+    if (persistence === undefined || remove === undefined) {
       throw new RemoteError('session/store-unavailable', 'this deployment cannot remove stored sessions', {})
     }
     // A Session loaded in this window holds a read handle, and its Agent (when
@@ -480,7 +483,7 @@ export class SessionController extends TypertRemoteService {
     }
     signal.throwIfAborted()
     try {
-      return await remove.call(this.ctx.sessionPersistence, request.sessionId, { signal })
+      return await remove.call(persistence, request.sessionId, { signal })
     } catch (error: unknown) {
       signal.throwIfAborted()
       if (this.isMissingSession(error, request.sessionId)) {
@@ -501,13 +504,14 @@ export class SessionController extends TypertRemoteService {
    */
   @Remote('restore')
   async restore(request: SessionRestoreRequest, signal: AbortSignal): Promise<SessionRestoreValue> {
-    const restore = this.ctx.get('sessionPersistence')?.restore
-    if (restore === undefined) {
+    const persistence = this.ctx.get('sessionPersistence')
+    const restore = persistence?.restore
+    if (persistence === undefined || restore === undefined) {
       throw new RemoteError('session/store-unavailable', 'this deployment keeps no recoverable sessions', {})
     }
     signal.throwIfAborted()
     try {
-      return await restore.call(this.ctx.sessionPersistence, request.sessionId, { signal })
+      return await restore.call(persistence, request.sessionId, { signal })
     } catch (error: unknown) {
       signal.throwIfAborted()
       if (this.isMissingSession(error, request.sessionId)) {
