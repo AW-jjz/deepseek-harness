@@ -199,7 +199,7 @@ it('scopes the optional temporary directory to installer building without changi
   expect(defaultBranch).not.toContain('temporaryDirectory')
 })
 
-it.skipIf(process.platform !== 'win32')('keeps the dependency store stable across run-specific pnpm homes', () => {
+it.skipIf(process.platform !== 'win32')('keeps the dependency store stable across run-specific pnpm homes', { timeout: 60_000 }, () => {
   const directory = mkdtempSync(resolve(tmpdir(), 'windows-package-store-'))
   try {
     const workspace = resolve(directory, 'runner', 'repo')

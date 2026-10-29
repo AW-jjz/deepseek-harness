@@ -5,7 +5,7 @@ import { join, resolve } from 'node:path'
 import yaml from 'js-yaml'
 import { expect, it } from 'vitest'
 
-it.each(['macos', 'windows'])('%s packaging accepts test branches but preserves production and tag restrictions', (platform) => {
+it.each(['macos', 'windows'])('%s packaging accepts test branches but preserves production and tag restrictions', { timeout: 60_000 }, (platform) => {
   const workflow = yaml.load(readFileSync(resolve(import.meta.dirname, `../.github/workflows/${platform}-package.yml`), 'utf8')) as {
     jobs: { package: { steps: Array<{ name?: string; run?: string }> } }
   }

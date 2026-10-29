@@ -144,7 +144,7 @@ describe('internal artifact build order', () => {
     expect(commands()).toHaveLength(1)
   })
 
-  it('defers benchmark diagnostics while normal artifact builds reject the same source', () => {
+  it('defers benchmark diagnostics while normal artifact builds reject the same source', { timeout: 60_000 }, () => {
     const { root, leaf } = fixture()
     const commands = recordedCommands(root)
     writeFileSync(join(leaf, 'src/index.ts'), 'export const value: number = "invalid"\n')

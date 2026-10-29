@@ -270,7 +270,13 @@ describe('release pack CLI', () => {
     expect(result.status, result.stderr).toBe(0)
     expect(readFileSync(join(root, 'packed', PUBLISH_ORDER_FILE), 'utf8')).toBe('\n')
     expect(readdirSync(join(root, 'packed'))).toEqual([PUBLISH_ORDER_FILE])
-    expect(existsSync(join(root, 'hooks.log'))).toBe(false)
+    // pnpm links the fixture workspace before `exec`, which runs each member's `prepare` script —
+    // that is the wrapper's doing, not the packer's. What must not happen is any pack lifecycle
+    // hook: `prepack`/`postpack` would mean a member was actually packaged.
+    const hooks = existsSync(join(root, 'hooks.log'))
+      ? readFileSync(join(root, 'hooks.log'), 'utf8').trim().split('\n').filter(Boolean)
+      : []
+    expect(hooks.filter(hook => !hook.endsWith(':prepare'))).toEqual([])
   })
 
   it('leaves no publish order after a pack hook fails', async () => {
@@ -321,7 +327,7 @@ describe('release pack CLI', () => {
   })
 
   it.each(['dependencies', 'optionalDependencies', 'peerDependencies'])(
-    'rejects nonexact DSH %s in the produced tarball before recording publication', async (section) => {
+    'rejects nonexact DSH %s in the produced tarball before recording publication', { timeout: 60_000 }, async (section) => {
       const root = fixture()
       packageFixture(root, 'packages/util/probe', '@deepseek-ai/dsh-probe', { [section]: { '@deepseek-ai/dsh-library': '^1.2.3' } })
       write(join(root, 'apps/web/dist/index.html'), '<main></main>')

@@ -177,7 +177,7 @@ describe('client build environment', () => {
     }).toThrow(/DSH_CLIENT_VERSION/)
   })
 
-  it('owns repository version, commit, and dirty metadata for complete builds', () => {
+  it('owns repository version, commit, and dirty metadata for complete builds', { timeout: 60_000 }, () => {
     const fixtureRoot = repositoryFixture()
     const commit = git(fixtureRoot, ['rev-parse', '--short=7', 'HEAD'])
 

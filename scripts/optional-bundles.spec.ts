@@ -180,7 +180,16 @@ describe('optional bundles', () => {
       { id: 'optional-session-query-sqlite', name: '@deepseek-ai/dsh-session-query-sqlite', config: { path: ':memory:', openAt: 'first-search' } },
       { id: 'optional-tool-session-query', name: '@deepseek-ai/dsh-tool-session-query' },
     ])
-    expect(composed.find(row => row.id === 'session-query-sqlite')?.config).toEqual({ path: ':memory:', openAt: 'never' })
+    // The web-app bundle moves the default index off `:memory:` and onto the durable cache under
+    // DSH_HOME, and warms it after activation; the base bundle keeps `:memory:`/`never` for builds
+    // that never compose the web overlay. Both are asserted, so the overlay cannot silently drift.
+    expect(composed.find(row => row.id === 'session-query-sqlite')?.config).toEqual({
+      path: { __jsExpr: "dshHomePath('cache/session-search.sqlite')" },
+      openAt: 'startup',
+      warmup: true,
+      reconcileIntervalMs: 2000,
+      candidateWindow: 200,
+    })
     expect(composed.find(row => row.id === 'session-title-llm')?.disabled).toBe(true)
     expect(composed.find(row => row.id === 'optional-session-title-all-prompts')?.name)
       .toBe('@deepseek-ai/dsh-session-title-all-prompts-llm')
