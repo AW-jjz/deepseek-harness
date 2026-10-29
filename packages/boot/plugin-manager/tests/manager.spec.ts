@@ -608,11 +608,11 @@ it('reports blocked scripts after a failed installation and retries only after e
     const completion = { exitCode: 0, output: '', truncated: false, logPath: join(dir, 'pnpm.log') }
     manifest.dependencies = { ...manifest.dependencies, addon: '1.0.0' }
     if (run.mock.calls.length === 1) {
-      writeFileSync(policy, 'allowBuilds:\n  native: set this to true or false\n  denied: false\n')
+      writeFileSync(policy, 'allowBuilds:\n  denied: false\n')
       completion.exitCode = 1
-      completion.output = 'ERR_PNPM_IGNORED_BUILDS'
+      completion.output = 'ERR_PNPM_IGNORED_BUILDS Ignored build scripts: native@1.0.0'
     } else {
-      expect(parse(readFileSync(policy, 'utf8'))).toEqual({ allowBuilds: { native: true, denied: false } })
+      expect(parse(readFileSync(policy, 'utf8'))).toEqual({ allowBuilds: { denied: false, 'native@1.0.0': true } })
       bundle('addon', [])
     }
     writeFileSync(join(dir, 'package.json'), JSON.stringify(manifest))
@@ -620,26 +620,26 @@ it('reports blocked scripts after a failed installation and retries only after e
   })
   onTestFinished(() => { run.mockRestore() })
   // The failed run's manifest change is put back; the policy pnpm wrote stays, so its undecided names can be offered.
-  expect(await manager.installBundle('addon')).toMatchObject({ application: 'failed', pendingBuilds: ['native'] })
+  expect(await manager.installBundle('addon')).toMatchObject({ application: 'failed', pendingBuilds: ['native@1.0.0'] })
   expect(readProfileManifest('test', dir).dependencies).not.toHaveProperty('addon')
-  expect(parse(readFileSync(policy, 'utf8'))).toMatchObject({ allowBuilds: { native: 'set this to true or false' } })
+  expect(parse(readFileSync(policy, 'utf8'))).toMatchObject({ allowBuilds: { 'native@1.0.0': 'set this to true or false' } })
   expect(await manager.installBundle('addon', { approvedBuilds: ['denied'] })).toMatchObject({ application: 'failed', changed: false, error: { code: 'stale-approval' } })
   expect(run).toHaveBeenCalledTimes(1)
-  expect(await manager.installBundle('addon', { approvedBuilds: ['native'], enabled: false })).toMatchObject({
-    application: 'applied', changed: true, approvedBuilds: ['native'],
+  expect(await manager.installBundle('addon', { approvedBuilds: ['native@1.0.0'], enabled: false })).toMatchObject({
+    application: 'applied', changed: true, approvedBuilds: ['native@1.0.0'],
   })
   expect(readProfileManifest('test', dir).dsh?.profile?.bundles).not.toContain('addon')
 })
 
 it('retains approved policy and reports it as changed when the registry fails before adding a dependency', async () => {
   const { manager, dir } = await fixture()
-  writeFileSync(join(dir, 'pnpm-workspace.yaml'), 'allowBuilds:\n  native: set this to true or false\n')
+  writeFileSync(join(dir, 'pnpm-workspace.yaml'), 'allowBuilds:\n  native@1.0.0: set this to true or false\n')
   const run = vi.spyOn(operations, 'runProfilePnpm').mockResolvedValue({ exitCode: 1, output: 'registry unavailable', truncated: false, logPath: '/log' })
   onTestFinished(() => { run.mockRestore() })
-  expect(await manager.installBundle('addon', { approvedBuilds: ['native'] })).toMatchObject({
-    changed: true, application: 'failed', pendingBuilds: [], approvedBuilds: ['native'], error: { diagnostic: 'registry unavailable' },
+  expect(await manager.installBundle('addon', { approvedBuilds: ['native@1.0.0'] })).toMatchObject({
+    changed: true, application: 'failed', pendingBuilds: [], approvedBuilds: ['native@1.0.0'], error: { diagnostic: 'registry unavailable' },
   })
-  expect(parse(readFileSync(join(dir, 'pnpm-workspace.yaml'), 'utf8'))).toEqual({ allowBuilds: { native: true } })
+  expect(parse(readFileSync(join(dir, 'pnpm-workspace.yaml'), 'utf8'))).toEqual({ allowBuilds: { 'native@1.0.0': true } })
 })
 
 it('runs a real pnpm dependency script only after approval and retry', async () => {

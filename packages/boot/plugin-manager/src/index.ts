@@ -34,7 +34,7 @@ import { dependencySpec, InvalidInstallSpecError, parseInstallSpec, type ParsedI
 import { attributeFailure, normalizeRegistry, NPMMIRROR_REGISTRY, registryPlan } from './registry.ts'
 import { flatten, writePluginEnabled } from './patch.ts'
 import { incompatiblePlugin, ManagementFailure } from './failure.ts'
-import { approveBuilds, recordPendingBuilds } from './build-approval.ts'
+import { approveBuilds, pinBroadBuilds, recordPendingBuilds } from './build-approval.ts'
 import { checkGithubConnection } from './github-connection.ts'
 import { chooseGitTransport, sshGitSpec } from './git-transport.ts'
 import { newerVersions, VERSION_FIELDS, VERSION_LIST_FIELDS, versionFacts } from './versions.ts'
@@ -921,6 +921,13 @@ export class PluginManager extends TypertRemoteService {
             this.ownerContext.logger.warn('Could not read pending build approvals after pnpm failed', error)
           }
           throw new Error(run.output)
+        }
+        // A broad approval recorded before approvals were pinned still covers every later version of its package.
+        try {
+          const pinned = await pinBroadBuilds(this.profile.dir)
+          if (pinned.length > 0) this.ownerContext.logger.debug(`Narrowed broad build approvals to ${pinned.join(', ')}`)
+        } catch (error) {
+          this.ownerContext.logger.warn('Could not narrow the broad build approvals of this profile', error)
         }
         const after = readProfileManifest('dsh', this.profile.dir).dependencies ?? {}
         const installed = Object.keys(after).filter(name => before[name] !== after[name])

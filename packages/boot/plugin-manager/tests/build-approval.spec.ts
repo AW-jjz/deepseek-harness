@@ -1,10 +1,10 @@
-/** Pending script permissions survive cleanup and preserve unrelated workspace settings. */
+/** Pending script permissions survive cleanup, preserve unrelated workspace settings, and name one exact dependency. */
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { expect, it, onTestFinished } from 'vitest'
 import { parse } from 'yaml'
-import { approveBuilds, recordPendingBuilds } from '../src/build-approval.ts'
+import { approveBuilds, pinBroadBuilds, recordPendingBuilds } from '../src/build-approval.ts'
 
 function fixture(text?: string) {
   const dir = mkdtempSync(join(tmpdir(), 'build-approval-'))
@@ -14,13 +14,31 @@ function fixture(text?: string) {
   return { dir, filename }
 }
 
+/** Write the manifest of a package this profile installed, at the path pnpm links it to. */
+function installed(dir: string, name: string, version: string, linker = 'root'): void {
+  const base = linker === 'root'
+    ? join(dir, 'node_modules', name)
+    : join(dir, 'node_modules', '.pnpm', 'node_modules', name)
+  mkdirSync(base, { recursive: true })
+  writeFileSync(join(base, 'package.json'), JSON.stringify({ name, version }))
+}
+
+/** Record the dependency paths pnpm refused to build in its own module manifest. */
+function refused(dir: string, ...paths: string[]): void {
+  const modules = join(dir, 'node_modules', '.modules.yaml')
+  mkdirSync(dirname(modules), { recursive: true })
+  writeFileSync(modules, JSON.stringify({ layoutVersion: 5, ignoredBuilds: paths }))
+}
+
 it('approves only named pending packages and preserves comments, decisions and settings', async () => {
   const { dir, filename } = fixture('# profile settings\nother: &unrelated value\ncopy: *unrelated\nnodeLinker: hoisted\nallowBuilds:\n  native: set this to true or false\n  "@scope/other": set this to true or false\n  trusted: true\n  denied: false\n  "@scope/*": set this to true or false\n')
-  expect(await recordPendingBuilds(dir, '')).toEqual(['native', '@scope/other'])
-  await approveBuilds(dir, ['native'])
+  installed(dir, 'native', '1.0.0')
+  // Migration replaces the broad key, and a replaced key sorts at the end of the mapping.
+  expect(await recordPendingBuilds(dir, '')).toEqual(['@scope/other', 'native@1.0.0'])
+  await approveBuilds(dir, ['native@1.0.0'])
   const text = readFileSync(filename, 'utf8')
   expect(text).toContain('# profile settings')
-  expect(parse(text)).toMatchObject({ nodeLinker: 'hoisted', allowBuilds: { native: true, trusted: true, denied: false } })
+  expect(parse(text)).toMatchObject({ nodeLinker: 'hoisted', allowBuilds: { 'native@1.0.0': true, trusted: true, denied: false } })
   expect(await recordPendingBuilds(dir, '')).toEqual(['@scope/other'])
 })
 
@@ -29,6 +47,72 @@ it.each(['missing', 'denied', '*', '--all'])('rejects an unlisted approval atomi
   const { dir, filename } = fixture(original)
   await expect(approveBuilds(dir, ['native', name])).rejects.toThrow('stale-approval')
   expect(readFileSync(filename, 'utf8')).toBe(original)
+})
+
+it('refuses a bare approval this profile cannot pin to an installed version', async () => {
+  const original = 'allowBuilds:\n  native: set this to true or false\n'
+  const { dir, filename } = fixture(original)
+  // The profile kept no manifest for it, so writing `native: true` would approve every later version as well.
+  await expect(approveBuilds(dir, ['native'])).rejects.toThrow('stale-approval')
+  expect(readFileSync(filename, 'utf8')).toBe(original)
+})
+
+it('approves a bare pending name under the version this profile installed', async () => {
+  const { dir, filename } = fixture('allowBuilds:\n  native: set this to true or false\n')
+  installed(dir, 'native', '3.2.1')
+  await approveBuilds(dir, ['native'])
+  expect(parse(readFileSync(filename, 'utf8'))).toEqual({ allowBuilds: { 'native@3.2.1': true } })
+})
+
+it('records a bare report under the version pnpm refused to build', async () => {
+  const { dir, filename } = fixture()
+  refused(dir, 'native@2.1.0(zod@3.0.0)', 'other@1.0.0')
+  expect(await recordPendingBuilds(dir, '[ERR_PNPM_IGNORED_BUILDS] Ignored build scripts: native\n'))
+    .toEqual(['native@2.1.0'])
+  expect(parse(readFileSync(filename, 'utf8'))).toEqual({ allowBuilds: { 'native@2.1.0': 'set this to true or false' } })
+})
+
+it('records every installed version a bare report resolves to', async () => {
+  const { dir } = fixture()
+  installed(dir, 'native', '1.0.0')
+  installed(dir, 'native', '2.0.0', 'pnpm')
+  expect(await recordPendingBuilds(dir, '[ERR_PNPM_IGNORED_BUILDS] Ignored build scripts: native\n'))
+    .toEqual(['native@1.0.0', 'native@2.0.0'])
+})
+
+it('leaves a bare report this profile cannot pin unrecorded rather than granting every version', async () => {
+  const { dir, filename } = fixture('nodeLinker: hoisted\n')
+  expect(await recordPendingBuilds(dir, '[ERR_PNPM_IGNORED_BUILDS] Ignored build scripts: ghost\n')).toEqual([])
+  expect(readFileSync(filename, 'utf8')).toBe('nodeLinker: hoisted\n')
+})
+
+it('narrows a broad approval to the version this profile resolved', async () => {
+  const { dir, filename } = fixture('allowBuilds:\n  native: true\n  trusted: true\n')
+  refused(dir, 'native@1.4.0')
+  expect(await pinBroadBuilds(dir)).toEqual(['native@1.4.0'])
+  expect(parse(readFileSync(filename, 'utf8'))).toEqual({ allowBuilds: { 'native@1.4.0': true, trusted: true } })
+})
+
+it('leaves a broad denial broad, because pinning one would allow every other version', async () => {
+  const original = 'allowBuilds:\n  native: false\n'
+  const { dir, filename } = fixture(original)
+  installed(dir, 'native', '1.0.0')
+  expect(await pinBroadBuilds(dir)).toEqual([])
+  expect(readFileSync(filename, 'utf8')).toBe(original)
+})
+
+it('keeps a decision already recorded for the exact identity', async () => {
+  const { dir, filename } = fixture('allowBuilds:\n  native: true\n  native@1.0.0: false\n')
+  installed(dir, 'native', '1.0.0')
+  expect(await pinBroadBuilds(dir)).toEqual(['native@1.0.0'])
+  expect(parse(readFileSync(filename, 'utf8'))).toEqual({ allowBuilds: { 'native@1.0.0': false } })
+})
+
+it('leaves a profile without settings untouched', async () => {
+  const { dir, filename } = fixture()
+  installed(dir, 'native', '1.0.0')
+  expect(await pinBroadBuilds(dir)).toEqual([])
+  expect(existsSync(filename)).toBe(false)
 })
 
 it('preserves pnpm file dependency selectors verbatim', async () => {

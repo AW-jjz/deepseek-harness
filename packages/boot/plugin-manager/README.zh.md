@@ -67,7 +67,7 @@ HTTP(S) Git URL 指向 pnpm 没有 HTTPS 到 SSH 回退的主机（即 `hosted-g
 
 `waitForInstall(requestId)` 让客户端在响应丢失后等待活动安装的结果，包括不可取消的应用阶段。它返回与原调用相同的结果，请求不在活动中时返回 `null`。已完成的结果不保留；`null` 不表示成功或已取消。
 
-pnpm 11 拦下依赖脚本时，失败的安装在 `pendingBuilds` 里报告 profile 中所有待决定的 `allowBuilds` 键，包括先前尝试留下的键、本次运行报告为已忽略的包名，以及 pnpm 为其拒绝准备的 git 托管包建议的键。git URL 携带凭据（密码，或 HTTP(S) 上的用户名）的键不会被记录，因此该安装只提供手动批准。pnpm 只在能够交互提示时才把这些条目写入 `pnpm-workspace.yaml`，因此由管理器自行记录本次运行报告的包名；失败的运行会恢复 `package.json` 与 `pnpm-lock.yaml`，但有意不恢复 `pnpm-workspace.yaml`。Web 插件页提供**允许这些脚本并重试**；工具可以在用户于对话中批准这些脚本后，通过 `install_bundle` 的 `approvedBuilds` 代为授权。服务只校验待决定的名字，不核实对话中的批准。授权按记录的键保存在当前 profile，该键会把 git 托管包固定到其提交，允许以宿主用户的权限执行命令，并在再次安装失败后保留。只能批准当前未决定的名字；已有的拒绝与通配规则不能通过此操作覆盖。`allowBuilds` 里出现 YAML 锚点或别名时拒绝授权。重试保留原来的启用选择。
+pnpm 11 拦下依赖脚本时，失败的安装在 `pendingBuilds` 里报告 profile 中所有待决定的 `allowBuilds` 键，包括先前尝试留下的键、本次运行报告为已忽略的包名，以及 pnpm 为其拒绝准备的 git 托管包建议的键。git URL 携带凭据（密码，或 HTTP(S) 上的用户名）的键不会被记录，因此该安装只提供手动批准。pnpm 只在能够交互提示时才把这些条目写入 `pnpm-workspace.yaml`，因此由管理器自行记录本次运行报告的包名；失败的运行会恢复 `package.json` 与 `pnpm-lock.yaml`，但有意不恢复 `pnpm-workspace.yaml`。报告里只有包名时，记录的是 pnpm 拒绝构建的那个依赖身份（`name@version`，取自它自己的模块清单）；该名字没有被拒绝时，用 profile 磁盘上已有的版本；profile 无法解析出身份的名字一律不记录。Web 插件页提供**允许这些脚本并重试**；工具可以在用户于对话中批准这些脚本后，通过 `install_bundle` 的 `approvedBuilds` 代为授权。服务只校验待决定的名字，不核实对话中的批准。授权按该精确键保存在当前 profile：git 托管包固定到其提交，registry 包固定到它解析出的版本，允许以宿主用户的权限执行命令，并在再次安装失败后保留。由于键只对应一个版本，同一包的新版本需要单独授权；更早版本留下的裸 `name: true` 会在下一次安装成功后收窄到已安装的版本，而拒绝（`false`）保持裸键——把它钉到某个版本会放行其余所有版本。只能批准当前未决定的名字；已有的拒绝与通配规则不能通过此操作覆盖。`allowBuilds` 里出现 YAML 锚点或别名时拒绝授权。重试保留原来的启用选择。
 
 <a id="version-compatibility-and-exemptions"></a>
 ### 版本兼容性与豁免
