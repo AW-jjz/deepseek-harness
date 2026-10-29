@@ -1,7 +1,6 @@
 /** Launch the Desktop profile through the Web application and report its URL to Electron. */
 
 import { delimiter, join } from 'node:path'
-import { createRequire } from 'node:module'
 import { inspect } from 'node:util'
 import { CordisError } from '@deepseek-ai/cordis'
 import { loadLayeredEnv, loadProfileDirectory, reportSkippedBundles } from '@deepseek-ai/dsh-app-boot'
@@ -18,28 +17,13 @@ import { installDesktopUpdateTaskControl } from './update-tasks.ts'
 import { installDesktopQuitInspection } from './quit-inspection.ts'
 import { installPlatformSessionPublisher } from './platform-session.ts'
 import { installOfficeEngineResolution } from './office-engine.ts'
-
-/**
- * Emit the machine-readable R-16 bridge diagnostics: whether V8 internals are exposed
- * on this Host and whether the resolver's addon still loads. The packaging smoke and
- * the release record consume these lines verbatim.
- */
-function reportInternalsDiagnostics(): void {
-  const internalsExposed = process.execArgv.includes('--expose-internals')
-  let addonAvailable = false
-  let addonVersion = 'unknown'
-  try {
-    const require = createRequire(import.meta.url)
-    try { addonVersion = (require('node-addon-require-builtin/package.json') as { version: string }).version } catch { /* exports map may hide package.json */ }
-    const addon = require('node-addon-require-builtin') as { requireBuiltin(moduleId: string): unknown }
-    addonAvailable = addon.requireBuiltin('internal/modules/cjs/loader') !== undefined
-  } catch { addonAvailable = false }
-  console.log(`internals exposed: ${internalsExposed}${internalsExposed ? '  reason: R-16 addon bridge; expires 2027-01-24' : ''}`)
-  console.log(`addon available: ${addonAvailable}  version: ${addonVersion}  via: direct requireBuiltin probe`)
-}
+import { inspectInternalsBridge } from './startup-diagnostics.ts'
 
 async function main(): Promise<void> {
-  reportInternalsDiagnostics()
+  // Machine-readable R-16 bridge diagnostics: whether V8 internals are exposed on this Host
+  // and whether the resolver's addon still loads. The packaging smoke and the release record
+  // consume these lines verbatim, so they are rendered by the module that also parses them.
+  for (const line of inspectInternalsBridge().lines) console.log(line)
   const runtimeDir = process.argv[2] as string
   const projectDir = process.argv[3] as string
   installOfficeEngineResolution(runtimeDir)
