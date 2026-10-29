@@ -945,6 +945,13 @@ describe('Node 24 lane ownership', () => {
     expect(subject.map(item => item.id)).not.toContain('doc-typecheck')
   })
 
+  it('runs the lockfile resolution gate in the static lane', () => {
+    const subject = withPnpmEntrypoint(() => gatesForMode('ci-static'))
+
+    expect(subject.find(item => item.id === 'lockfile-immutable')?.displayCommand)
+      .toBe('pnpm run verify-lockfile-immutable')
+  })
+
   it('owns the build and orders its artifact consumers', () => {
     const subject = withPnpmEntrypoint(() => gatesForMode('ci-consumers'))
 

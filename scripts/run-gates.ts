@@ -379,6 +379,7 @@ function ciSharedStaticGates(): Gate[] {
     pnpmScript('provider-data', 'verify-provider-data', { label: 'pi-ai provider metadata' }),
     pnpmScript('application-entrypoints', 'verify-application-entrypoints', { label: 'application entrypoints' }),
     pnpmScript('constraints', 'constraints'),
+    pnpmScript('lockfile-immutable', 'verify-lockfile-immutable', { label: 'lockfile resolution' }),
     pnpmScript('package-dependencies', 'verify-package-dependencies', { label: 'package dependencies' }),
     pnpmScript('dsh-package-licenses', 'verify-dsh-package-licenses', { label: 'DSH package licenses' }),
     pnpmScript('package-meta', 'verify-package-meta', { label: 'package metadata' }),

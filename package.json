@@ -141,6 +141,7 @@
     "verify-node-next-types": "tsx scripts/verify-node-next-types.ts",
     "verify-optional-dependency-imports": "tsx scripts/verify-optional-dependency-imports.ts",
     "verify-runtime-closure": "tsx scripts/verify-runtime-closure.ts",
+    "verify-lockfile-immutable": "tsx scripts/verify-lockfile-immutable.ts",
     "verify-default-product-isolation": "tsx scripts/verify-default-product-isolation.ts",
     "verify-application-entrypoints": "tsx scripts/verify-application-entrypoints.ts",
     "verify-package-dependencies": "tsx scripts/verify-package-dependencies.ts",
