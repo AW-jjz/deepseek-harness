@@ -1,5 +1,6 @@
 /** Desktop resource preparation publishes versions only for complete resources. */
 
+import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -8,6 +9,8 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 
 const state = vi.hoisted(() => ({
   root: '',
+  archive: '',
+  archiveSha: '',
   target: 'mac-arm64' as 'mac-arm64' | 'mac-x64' | 'win-x64',
   pnpm: '11.7.0' as string | undefined,
   failure: undefined as 'electron' | 'primary' | 'cli' | undefined,
@@ -22,7 +25,26 @@ vi.mock('../scripts/desktop-build-paths.mjs', async importOriginal => ({
     runtime: join(state.root, 'runtime'), electron: join(state.root, 'electron'), downloads: join(state.root, 'downloads'),
   }),
 }))
-vi.mock('@electron/get', () => ({ downloadArtifact: async () => 'electron.zip' }))
+// The download is mocked, but it must return a real archive: `prepare-runtime` reads the file to
+// verify it against the pin, so a bare path literal would make every case fail with ENOENT.
+vi.mock('@electron/get', () => ({ downloadArtifact: async () => state.archive }))
+// `verifyElectronArchive` calls `pinnedElectronArchiveSha256` through its own module binding, so
+// overriding the pin export alone cannot work. The digest maths is covered by
+// electron-archive.spec.ts; here the check only has to read a real file, so a fixture whose bytes
+// match the pinned stub keeps the "an archive is verified before it is unpacked" step honest.
+vi.mock('../scripts/electron-archive.ts', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../scripts/electron-archive.ts')>()
+  const { createHash } = await import('node:crypto')
+  const { readFileSync: read } = await import('node:fs')
+  return {
+    ...actual,
+    pinnedElectronArchiveSha256: () => state.archiveSha,
+    verifyElectronArchive: (archive: string) => {
+      const digest = createHash('sha256').update(read(archive)).digest('hex')
+      if (digest !== state.archiveSha) throw new Error(`desktop electron archive fixture: ${digest} is not the pinned ${state.archiveSha}`)
+    },
+  }
+})
 vi.mock('extract-zip', () => ({ default: state.extractElectron }))
 vi.mock('node:child_process', async importOriginal => ({
   ...await importOriginal<typeof import('node:child_process')>(),
@@ -48,6 +70,9 @@ beforeEach(() => {
   vi.resetModules()
   vi.clearAllMocks()
   state.root = mkdtempSync(join(tmpdir(), 'desktop-runtime-preparation-'))
+  state.archive = join(state.root, 'electron-v0.0.0-fixture.zip')
+  writeFileSync(state.archive, 'electron release archive fixture')
+  state.archiveSha = createHash('sha256').update(readFileSync(state.archive)).digest('hex')
   state.target = 'mac-arm64'
   state.pnpm = '11.7.0'
   state.failure = undefined

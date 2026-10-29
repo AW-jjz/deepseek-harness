@@ -53,6 +53,10 @@ vi.mock('electron', () => ({
     name: 'Harness',
     requestSingleInstanceLock: () => true,
     setAsDefaultProtocolClient: vi.fn(),
+    // `main()` reconciles the stored startAtLogin preference at startup; without this the call
+    // throws into a logged warning and the startup path under test is no longer a pure one.
+    getLoginItemSettings: () => ({ openAtLogin: false }),
+    setLoginItemSettings: vi.fn(),
     whenReady: () => Promise.resolve(),
     getLocale: () => 'en',
     getVersion: () => '1.0.0',
@@ -109,7 +113,13 @@ vi.mock('electron', () => ({
 vi.mock('../src/tray.ts', () => ({ DesktopTray: class { relabel() {} dispose() {} } }))
 
 vi.mock('../src/paths.ts', () => ({ resolveDesktopPaths: () => ({ profile: '/profile' }) }))
-vi.mock('../src/settings.ts', () => ({ readDesktopSettings: () => ({ updates: { allowTestAuthPopupWindow: false } }) }))
+// `main()` reads every settings section unconditionally (launch.* for the OS login item,
+// notifications.taskCompletion for task notices), so the mock must carry the whole shape.
+vi.mock('../src/settings.ts', () => ({ readDesktopSettings: () => ({
+  updates: { allowTestAuthPopupWindow: false },
+  launch: { startAtLogin: false },
+  notifications: { taskCompletion: true },
+}) }))
 vi.mock('../src/login-shell-environment.ts', async importOriginal => ({
   ...await importOriginal<typeof import('../src/login-shell-environment.ts')>(),
   readDesktopLoginShellEnvironment: async (base: NodeJS.ProcessEnv) => ({ environment: base, failures: [] }),
