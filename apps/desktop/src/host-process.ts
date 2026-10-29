@@ -157,6 +157,19 @@ export class DesktopHostFatalError extends Error {
   get diagnostic(): string | undefined { return this.#diagnostic }
 }
 
+/**
+ * Decide whether the Host child gets `--expose-internals`, the flag leg of the R-16 bridge.
+ *
+ * Exported so the build-time matrix gate (`internals-matrix.ts`) reads this decision from the
+ * code that makes it instead of restating it: while the pinned addon rejects the pinned
+ * Electron, a Host started without this flag cannot resolve internals at all.
+ * @param environment - Environment the Host is launched with.
+ * @returns True unless `DSH_EXPOSE_INTERNALS=0` explicitly opts the deployment out.
+ */
+export function shouldExposeInternals(environment: NodeJS.ProcessEnv): boolean {
+  return environment.DSH_EXPOSE_INTERNALS !== '0'
+}
+
 /** One Web backend running under the Electron executable in Node mode. */
 export class DesktopHostProcess {
   private child: ChildProcess | undefined
@@ -215,7 +228,7 @@ export class DesktopHostProcess {
     // Electron fingerprint, so the resolver falls back to native internals and the flag ships
     // enabled by default. `DSH_EXPOSE_INTERNALS=0` opts a deployment out; the flag is removed
     // again once an addon release whose matrix covers this Electron lands (expires 2027-01-24).
-    const exposeInternals = this.environment.DSH_EXPOSE_INTERNALS !== '0'
+    const exposeInternals = shouldExposeInternals(this.environment)
     const child = spawn(this.node, [
       ...(exposeInternals ? ['--expose-internals'] : []),
       ...(this.inspectPort === undefined ? [] : [`--inspect=127.0.0.1:${String(this.inspectPort)}`]),

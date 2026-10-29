@@ -25,6 +25,8 @@ import { suggestDesktopBuildVersion } from './desktop-build-version-discovery.ts
 import { assertDesktopBuildProvenance, desktopBuildCommitEnvironment, readDesktopBuildCommit, resolveDesktopBuildCommit } from './desktop-build-commit.mjs'
 import { requireDesktopToolchain } from './desktop-toolchain-preflight.ts'
 import { withMacOSNotarizationProxy } from './macos-notarization-proxy.ts'
+import { shouldExposeInternals } from '../src/host-process.ts'
+import { assertInternalsMatrixGate } from '../src/internals-matrix.ts'
 
 const APP_ROOT = resolve(import.meta.dirname, '..')
 const REPOSITORY_ROOT = resolve(APP_ROOT, '..', '..')
@@ -367,6 +369,17 @@ async function main(): Promise<void> {
   const provenance = assertDesktopBuildProvenance(REPOSITORY_ROOT, APP_ROOT, packaged, environment)
   Object.assign(environment, desktopBuildCommitEnvironment(packaged))
   process.stdout.write(`desktop package: sources ${provenance.commit.slice(0, 12)}${provenance.dirty ? ' (dirty, internal only)' : ''}, Electron ${provenance.electron}\n`)
+  // R-16 internals gate: while the pinned addon rejects the pinned Electron, the flag is the only
+  // working internals leg, so a default that stops passing it would ship an installer that cannot
+  // boot. Judged here, before a run directory or an artifact exists.
+  const internals = assertInternalsMatrixGate({
+    electronVersion: provenance.electron, exposesInternals: shouldExposeInternals({}),
+  })
+  process.stdout.write(`desktop package: internals matrix: ${internals.reason}\n`)
+  if (!internals.addonCoversElectron) {
+    process.stdout.write('desktop package: DSH_EXPOSE_INTERNALS=0 cannot start this build — the addon '
+      + 'rejects this Electron and the flag is the working leg; that opt-out is for a future pin\n')
+  }
   const secrets = Object.entries(environment).filter(([name]) => /KEY|SECRET|TOKEN|PASSWORD|APPLE_ID/iu.test(name)).map(([, value]) => value ?? '')
   const run = createPackagingRun(join(APP_ROOT, '.desktop-build', 'packaging-runs'), {
     target: target.name, unsigned: invocation.unsigned, skipNotarization: invocation.skipNotarization,
