@@ -39,12 +39,14 @@ import { Context, Service } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import { watch as chokidarWatch } from 'chokidar'
 import { mkdir, readFile, stat } from 'node:fs/promises'
+import type { Stats } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { Document, isMap, isScalar, parseDocument, type YAMLError } from 'yaml'
 import { withFileLock, writeFileAtomic } from '@deepseek-ai/dsh-atomic-write'
 import { canonicalizeWatchPath, resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 import { launchEnvironmentOf } from '@deepseek-ai/dsh-launch-environment'
 import { CredentialProvider, credentialRef, parseCredentialKey } from '@deepseek-ai/dsh-credentials'
+import { broadPrincipalGrants, readFileSddl } from './windows-acl.ts'
 import type {
   ApiKeyRecord,
   CredentialInfo,
@@ -118,28 +120,40 @@ const DOCUMENT_LOCK_WAIT_MS = 30_000
  * and silently serving secrets out of a world-readable file would make the
  * mode the provider promises meaningless.
  *
- * POSIX only: Windows has no mode to inspect — its ACLs are not expressible
- * here — so the check is skipped rather than faked, and the file's protection
- * there is whatever the create and replace APIs express.
+ * POSIX inspects the mode; Windows reads the file's DACL as SDDL and refuses any grant to a
+ * broad principal (Everyone, Authenticated Users, Users, Interactive). Both are fail-closed: a
+ * DACL that cannot be read is treated as unprotected rather than assumed safe.
  * @param filename - absolute path of the document.
- * @throws when the path hierarchy is invalid or the file exists with group or other permission bits set.
+ * @throws when the path hierarchy is invalid or the file exists and other principals can read it.
  */
 async function assertOwnerOnly(filename: string): Promise<void> {
-  let mode: number
+  let stats: Stats
   try {
-    mode = (await stat(filename)).mode
+    stats = await stat(filename)
   } catch (error) {
     if (!isENOENT(error)) throw error
     await canonicalizeWatchPath(filename)
     return
   }
-  /* v8 ignore next -- POSIX coverage cannot take the Windows peer; native Windows coverage does. */
-  if (process.platform === 'win32') return
+  // Windows has no mode to inspect, so its DACL is read instead: a grant to Everyone,
+  // Authenticated Users, Users or Interactive opens the file to every local process the same way
+  // a world-readable mode does, and the check must refuse it rather than skip because NTFS cannot
+  // express a POSIX bit.
+  /* v8 ignore start -- a POSIX run cannot take the Windows peer; the Windows-only spec covers it. */
+  if (process.platform === 'win32') {
+    const findings = broadPrincipalGrants(readFileSddl(filename, `${String(stats.mtimeMs)}:${String(stats.size)}`))
+    if (findings.length === 0) return
+    throw new Error(
+      `credentials-local: ${filename} is readable beyond its owner (${findings.join(', ')});`
+      + ' remove those grants or move the document under a private directory before starting again',
+    )
+  }
+  /* v8 ignore stop */
   /* v8 ignore start -- Windows has no POSIX mode enforcement; POSIX behavior tests enforce this peer. */
-  const offending = mode & GROUP_OTHER_BITS
+  const offending = stats.mode & GROUP_OTHER_BITS
   if (offending === 0) return
   throw new Error(
-    `credentials-local: ${filename} is readable beyond its owner (mode ${(mode & 0o777).toString(8)});`
+    `credentials-local: ${filename} is readable beyond its owner (mode ${(stats.mode & 0o777).toString(8)});`
     + ` run "chmod 600 ${filename}" before starting again`,
   )
   /* v8 ignore stop */
