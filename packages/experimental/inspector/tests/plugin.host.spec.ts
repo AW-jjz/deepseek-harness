@@ -91,7 +91,11 @@ describe('experimental Inspector Host plugin', () => {
     expect(open).not.toHaveBeenCalled()
     const endpoint = value as { endpoint: string; protocol: string }
     const authority = new URL(endpoint.endpoint)
-    const targets: unknown = await fetch(`http://${authority.host}/json`).then(response => response.json())
+    // Discovery is behind the per-run token: a local port scan must not learn the target id.
+    const denied = await fetch(`http://${authority.host}/json`)
+    expect(denied.status).toBe(403)
+    const targets: unknown = await fetch(`http://${authority.host}/json?token=${encodeURIComponent(endpoint.protocol)}`)
+      .then(response => response.json())
     if (!Array.isArray(targets) || !isPlainObject(targets[0]) || typeof targets[0].webSocketDebuggerUrl !== 'string') {
       throw new Error('Inspector discovery did not return a target')
     }

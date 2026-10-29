@@ -227,10 +227,13 @@ export async function startInspector(options: InspectorOptions = {}): Promise<In
     throw error
   })
   const authority = `${ready.host}:${String(ready.port)}`
+  // The CDP surface requires the per-run token; the Worker prints and returns URLs that already
+  // carry it, and this handle is what the plugin hands to the DevTools frontend.
+  const cdpPath = `/devtools/page/${ready.targetId}?token=${encodeURIComponent(clientProtocol)}`
   const endpoint: InspectorEndpoint = {
     httpUrl: `http://${authority}/`,
-    webSocketDebuggerUrl: `ws://${authority}/devtools/page/${ready.targetId}`,
-    devtoolsFrontendUrl: `devtools://devtools/bundled/devtools_app.html?ws=${authority}/devtools/page/${ready.targetId}&panel=elements&noJavaScriptCompletion=true`,
+    webSocketDebuggerUrl: `ws://${authority}${cdpPath}`,
+    devtoolsFrontendUrl: `devtools://devtools/bundled/devtools_app.html?ws=${authority}${cdpPath}&panel=elements&noJavaScriptCompletion=true`,
     client: {
       endpoint: `ws://${authority}/ingest`,
       protocol: clientProtocol,

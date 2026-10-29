@@ -71,6 +71,11 @@ describe('Inspector endpoint port selection', () => {
     expect(selectedPort).toBeGreaterThan(occupiedAddress.port)
     expect(new URL(inspector.endpoint.webSocketDebuggerUrl).port).toBe(String(selectedPort))
     expect(new URL(inspector.endpoint.client.endpoint).port).toBe(String(selectedPort))
-    await expect(fetch(new URL('json', inspector.endpoint.httpUrl)).then(response => response.status)).resolves.toBe(200)
+    // Discovery is token-gated, so the readiness probe has to present the per-run token.
+    const discovery = new URL('json', inspector.endpoint.httpUrl)
+    discovery.searchParams.set('token', inspector.endpoint.client.protocol)
+    await expect(fetch(discovery).then(response => response.status)).resolves.toBe(200)
+    await expect(fetch(new URL('json', inspector.endpoint.httpUrl)).then(response => response.status))
+      .resolves.toBe(403)
   })
 })

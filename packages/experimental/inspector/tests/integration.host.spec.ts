@@ -193,7 +193,9 @@ describe('experimental Inspector real Worker', () => {
   it('rejects malformed Client selectors before admitting a CDP connection', async () => {
     inspector = await startInspector({ port: 0, captureFetch: false })
     for (const query of ['clientSourceId=', 'clientSourceId=a&clientSourceId=b']) {
-      await expect(TestCdpClient.connect(`${inspector.endpoint.webSocketDebuggerUrl}?${query}`))
+      const selected = new URL(inspector.endpoint.webSocketDebuggerUrl)
+      for (const [key, value] of new URLSearchParams(query)) selected.searchParams.append(key, value)
+      await expect(TestCdpClient.connect(selected.toString()))
         .rejects.toThrow('400')
     }
     cdp = await TestCdpClient.connect(inspector.endpoint.webSocketDebuggerUrl)

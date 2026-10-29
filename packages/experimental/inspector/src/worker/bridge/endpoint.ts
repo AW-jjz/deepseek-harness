@@ -1,6 +1,7 @@
 /** Worker-owned HTTP discovery, DevTools CDP, and Client-ingest endpoints. */
 
 import { createServer, type IncomingMessage, type Server } from 'node:http'
+import { timingSafeEqual } from 'node:crypto'
 import type { AddressInfo } from 'node:net'
 import type { Duplex } from 'node:stream'
 import { WebSocketServer, type RawData, type WebSocket } from 'ws'
@@ -23,6 +24,17 @@ export interface InspectorEndpointInfo {
   readonly port: number
   readonly targetId: string
 }
+
+/**
+ * Query parameter carrying the per-run CDP token.
+ *
+ * A loopback port alone is not access control: any local process can enumerate ports and attach
+ * a debugger, and attaching one means `Runtime.evaluate` runs arbitrary code inside this process.
+ * The token is random per run and only ever travels in URLs this package prints or returns, so a
+ * scanner cannot guess it. It lives in the query string (not a header) because the DevTools
+ * frontend opens `webSocketDebuggerUrl` as-is and cannot set request headers.
+ */
+const CDP_TOKEN_QUERY = 'token'
 
 /** Worker-owned network endpoint. */
 export class InspectorEndpoint {
@@ -100,10 +112,18 @@ export class InspectorEndpoint {
   private handleHttp(request: IncomingMessage, response: import('node:http').ServerResponse): void {
     const pathname = new URL(request.url ?? '/', 'http://inspector.invalid').pathname
     if (pathname === '/json' || pathname === '/json/list') {
+      if (!this.cdpAuthorized(request)) {
+        this.denyDiscovery(response)
+        return
+      }
       this.json(response, [this.target()])
       return
     }
     if (pathname === '/json/version') {
+      if (!this.cdpAuthorized(request)) {
+        this.denyDiscovery(response)
+        return
+      }
       this.json(response, {
         Browser: 'dsh-experimental-inspector/0',
         'Protocol-Version': '1.3',
@@ -124,6 +144,10 @@ export class InspectorEndpoint {
       return
     }
     if (url.pathname === `/devtools/page/${this.config.targetId}`) {
+      if (!this.cdpAuthorized(request)) {
+        socket.end('HTTP/1.1 403 Forbidden\r\nConnection: close\r\nContent-Length: 0\r\n\r\n')
+        return
+      }
       let clientSourceId: InspectorSourceId | undefined
       try {
         clientSourceId = readInspectorClientSelection(url)
@@ -232,6 +256,57 @@ export class InspectorEndpoint {
     }
   }
 
+  /**
+   * Decide whether one request may reach the CDP surface (discovery and debugger attachment).
+   *
+   * Three independent checks, cheapest first: the per-run token (stops a local port scanner from
+   * attaching), the `Host` header (stops a web page from reaching this port through a rebound DNS
+   * name, where the URL would carry a foreign authority), and `Origin` (absent for the DevTools
+   * frontend and for the Host proxy, present and attacker-controlled for any browser page).
+   * @param request - The HTTP request or upgrade request being admitted.
+   * @returns True only when all three checks pass.
+   */
+  private cdpAuthorized(request: IncomingMessage): boolean {
+    const url = new URL(request.url ?? '/', 'http://inspector.invalid')
+    if (!this.tokenAccepted(url.searchParams.get(CDP_TOKEN_QUERY))) return false
+    if (!this.hostAccepted(request.headers.host)) return false
+    return this.originAccepted(request.headers.origin)
+  }
+
+  private tokenAccepted(presented: string | null): boolean {
+    if (presented === null || presented.length === 0) return false
+    const expected = Buffer.from(this.config.clientToken, 'utf8')
+    const actual = Buffer.from(presented, 'utf8')
+    // timingSafeEqual throws on length mismatch, which would itself leak the token length.
+    if (actual.length !== expected.length) return false
+    return timingSafeEqual(actual, expected)
+  }
+
+  private hostAccepted(host: string | undefined): boolean {
+    if (host === undefined) return false
+    const hostname = host.startsWith('[')
+      ? host.slice(0, host.indexOf(']') + 1)
+      : host.split(':')[0] ?? ''
+    if (hostname === '') return false
+    if (hostname === this.config.host) return true
+    return LOOPBACK_HOSTNAMES.includes(hostname.toLowerCase())
+  }
+
+  private originAccepted(origin: string | undefined): boolean {
+    if (origin === undefined) return true
+    if (this.config.clientOrigins.includes(origin)) return true
+    try {
+      return LOOPBACK_HOSTNAMES.includes(new URL(origin).hostname.toLowerCase())
+    } catch {
+      return false
+    }
+  }
+
+  private denyDiscovery(response: import('node:http').ServerResponse): void {
+    response.writeHead(403, { 'content-type': 'application/json; charset=utf-8' })
+    response.end(JSON.stringify({ error: 'inspector: CDP discovery requires the per-run token' }))
+  }
+
   private target(): object {
     return {
       id: this.config.targetId,
@@ -240,12 +315,13 @@ export class InspectorEndpoint {
       description: 'Experimental cross-realm Inspector target',
       url: 'dsh://host',
       webSocketDebuggerUrl: this.cdpUrl(),
-      devtoolsFrontendUrl: `devtools://devtools/bundled/devtools_app.html?ws=${this.config.host}:${this.boundPort()}/devtools/page/${this.config.targetId}&panel=elements&noJavaScriptCompletion=true`,
+      devtoolsFrontendUrl: `devtools://devtools/bundled/devtools_app.html?ws=${this.config.host}:${this.boundPort()}/devtools/page/${this.config.targetId}?${CDP_TOKEN_QUERY}=${encodeURIComponent(this.config.clientToken)}&panel=elements&noJavaScriptCompletion=true`,
     }
   }
 
   private cdpUrl(): string {
     return `ws://${this.config.host}:${String(this.boundPort())}/devtools/page/${this.config.targetId}`
+      + `?${CDP_TOKEN_QUERY}=${encodeURIComponent(this.config.clientToken)}`
   }
 
   private boundPort(): number {
@@ -273,29 +349,31 @@ export class InspectorEndpoint {
   }
 }
 
-function listen(server: Server, port: number, host: string): Promise<AddressInfo> {
-  return new Promise((resolve, reject) => {
-    const finish = (): void => {
-      server.off('error', onError)
-      server.off('listening', onListening)
+/** Hostnames a request may name while still counting as "this machine". */
+const LOOPBACK_HOSTNAMES = ['localhost', '127.0.0.1', '[::1]', '::1']
+
+function listen(server: Server, port: number, host: string): Promise<AddressInfo> {  return new Promise((resolve, reject) => {
+  const finish = (): void => {
+    server.off('error', onError)
+    server.off('listening', onListening)
+  }
+  const onError = (error: Error): void => {
+    finish()
+    reject(error)
+  }
+  const onListening = (): void => {
+    finish()
+    const address = server.address()
+    if (address === null || typeof address === 'string') {
+      reject(new Error('inspector: endpoint did not bind a TCP port'))
+      return
     }
-    const onError = (error: Error): void => {
-      finish()
-      reject(error)
-    }
-    const onListening = (): void => {
-      finish()
-      const address = server.address()
-      if (address === null || typeof address === 'string') {
-        reject(new Error('inspector: endpoint did not bind a TCP port'))
-        return
-      }
-      resolve(address)
-    }
-    server.once('error', onError)
-    server.once('listening', onListening)
-    server.listen(port, host)
-  })
+    resolve(address)
+  }
+  server.once('error', onError)
+  server.once('listening', onListening)
+  server.listen(port, host)
+})
 }
 
 function isAddressInUse(error: unknown): boolean {
