@@ -13,8 +13,25 @@ import { availableParallelism } from 'node:os'
 /** Largest default worker count outside CI. */
 export const LOCAL_PARALLELISM_CAP = 12
 
-/** Largest default Vitest fork count outside CI, for unit and coverage runs. */
+/**
+ * Largest default Vitest fork count outside CI, for coverage runs.
+ *
+ * This is the *budget* handed to coverage; see {@link LOCAL_VITEST_FORK_CAP} for the fork count
+ * plain test runs use.
+ */
 export const LOCAL_TEST_PARALLELISM_CAP = 48
+
+/**
+ * Largest default fork count outside CI for plain (non-coverage) test runs.
+ *
+ * Lower than {@link LOCAL_TEST_PARALLELISM_CAP} on purpose: a fork is not a cheap unit. Many
+ * `apps/desktop` suites spawn real processes (pwsh, signtool, cl.exe, Electron) or walk the whole
+ * workspace, so beyond the physical budget they spend their time queueing on the disk and trip the
+ * 5 s default test budget. At 48 forks the desktop suite fails a different handful of cases on every
+ * run — a case that takes 1.4 s alone has been observed at 9.9 s — while at 12 it is green and about
+ * 30% faster in wall clock (24 s vs 34 s for 171 files).
+ */
+export const LOCAL_VITEST_FORK_CAP = 12
 
 /**
  * Resolve the default worker budget for one process.
