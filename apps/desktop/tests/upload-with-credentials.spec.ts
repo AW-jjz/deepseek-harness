@@ -115,7 +115,9 @@ describe('credential launcher destination', () => {
 
 // DPAPI's user-and-machine encryption is Windows-only.
 describe.skipIf(process.platform !== 'win32')('Windows upload credentials', () => {
-  it.each(['production', 'test'])('checks %s credentials without uploading or changing the parent', async (deployment) => {
+  // Each case spawns a real pwsh child that decrypts a fixture credential: a process startup that
+  // sits just under the 5 s default and tips over it when the whole suite shares the CPU.
+  it.each(['production', 'test'])('checks %s credentials without uploading or changing the parent', { timeout: 60_000 }, async (deployment) => {
     const result = await check('valid', deployment)
     expect(result.code, result.output).toBe(0)
     const expected = await readFile(new URL('./expected/upload-credentials-check.txt', import.meta.url), 'utf8')

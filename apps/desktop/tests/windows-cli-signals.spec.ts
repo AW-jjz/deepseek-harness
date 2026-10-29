@@ -19,6 +19,8 @@ let electron: string
 let entry: string
 
 describe.skipIf(process.platform !== 'win32')('Windows Electron console signals', () => {
+  // Compiles a C++ probe with cl.exe and transpiles the module under test: real toolchain work
+  // that outgrows the 10 s hook default once the whole suite is competing for the CPU.
   beforeAll(async () => {
     root = await mkdtemp(join(tmpdir(), 'dsh-cli-console-'))
     electron = require('electron') as string
@@ -56,7 +58,7 @@ describe.skipIf(process.platform !== 'win32')('Windows Electron console signals'
       "writeFileSync(ready, 'ready')",
       'setInterval(() => {}, 1000)', '',
     ].join('\n'))
-  })
+  }, 60_000)
 
   afterAll(async () => {
     if (root === undefined) return

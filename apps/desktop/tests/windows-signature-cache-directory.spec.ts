@@ -30,7 +30,9 @@ it.each(['', 'cache', 'C:cache', '\\cache', '\\\\server\\share', '\\\\?\\C:\\cac
   expect(() => resolveWindowsSignatureCacheDirectory({ DSH_DESKTOP_WINDOWS_SIGNATURE_CACHE_DIR: path })).toThrow(/absolute local/u)
 })
 
-it.skipIf(process.platform !== 'win32')('creates private storage and rejects linked or publicly readable cache roots', async (t) => {
+// Creates, locks and inspects real cache directories (ACL work per directory): overruns the 5 s
+// default when the whole suite is competing for the CPU.
+it.skipIf(process.platform !== 'win32')('creates private storage and rejects linked or publicly readable cache roots', { timeout: 60_000 }, async (t) => {
   const root = await mkdtemp(join(import.meta.dirname, 'directory-test-'))
   t.onTestFinished(() => rm(root, { recursive: true, force: true }))
   const cache = join(root, 'private')

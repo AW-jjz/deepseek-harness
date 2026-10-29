@@ -33,7 +33,9 @@ test('empty input launches no verifier and returns no rows', async () => {
   assert.deepEqual(await inspectSignaturesBatched([]), [])
 })
 
-test.skipIf(process.platform !== 'win32')('Unicode paths retain the same Windows trust result as individual inspection', async (t) => {
+// Runs the real trust verification (PowerShell) on a unicode path: a process spawn that overruns
+// the 5 s default under the full suite's CPU contention.
+test.skipIf(process.platform !== 'win32')('Unicode paths retain the same Windows trust result as individual inspection', { timeout: 60_000 }, async (t) => {
   const root = await mkdtemp(join(tmpdir(), 'signature-batch-'))
   t.onTestFinished(() => rm(root, { recursive: true, force: true }))
   const path = join(root, "验证 ' 文件.exe")

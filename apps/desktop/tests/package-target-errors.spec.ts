@@ -5,8 +5,11 @@ import { fileURLToPath } from 'node:url'
 import { expect, it, vi } from 'vitest'
 
 const state = vi.hoisted(() => ({ root: '', directory: '' }))
+// The macOS target asserts build provenance, which shells out to `git status` on the real
+// checkout; a sibling test staging a temporary directory makes that instant look dirty. This test
+// is about redaction, not provenance, so the environment it hands the packaging run opts out.
 vi.mock('../scripts/desktop-package-environment.mjs', () => ({
-  loadDesktopPackageEnvironment: () => ({ DSH_DESKTOP_WINDOWS_TOKEN_PIN: 'credential-sentinel' }),
+  loadDesktopPackageEnvironment: () => ({ DSH_DESKTOP_WINDOWS_TOKEN_PIN: 'credential-sentinel', DSH_DESKTOP_ALLOW_DIRTY_BUILD: '1' }),
   validateDesktopPackageEnvironment: () => {},
 }))
 vi.mock('../scripts/macos-signing-keychain.mjs', () => ({
