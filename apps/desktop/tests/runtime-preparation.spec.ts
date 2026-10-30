@@ -13,6 +13,9 @@ const state = vi.hoisted(() => ({
   archiveSha: '',
   target: 'mac-arm64' as 'mac-arm64' | 'mac-x64' | 'win-x64',
   pnpm: '11.7.0' as string | undefined,
+  // The version the fake Electron binary reports; the baseline gate judges it, so a case that
+  // moves it below `EMBEDDED_NODE_BASELINE` must be refused before anything is published.
+  embeddedNode: '24.22.1' as string,
   failure: undefined as 'electron' | 'primary' | 'cli' | undefined,
   preparePrimary: vi.fn(),
   extractElectron: vi.fn(),
@@ -48,7 +51,7 @@ vi.mock('../scripts/electron-archive.ts', async (importOriginal) => {
 vi.mock('extract-zip', () => ({ default: state.extractElectron }))
 vi.mock('node:child_process', async importOriginal => ({
   ...await importOriginal<typeof import('node:child_process')>(),
-  execFileSync: (file: string) => file === '/usr/libexec/PlistBuddy' ? '12.0\n' : '24.18.1\n',
+  execFileSync: (file: string) => file === '/usr/libexec/PlistBuddy' ? '12.0\n' : `${state.embeddedNode}\n`,
 }))
 vi.mock('../scripts/prepare-command-link.ts', () => ({ prepareCommandLink: state.commandLink }))
 // The compiled command manager is a build input; all source resource copies use real files.
@@ -75,6 +78,7 @@ beforeEach(() => {
   state.archiveSha = createHash('sha256').update(readFileSync(state.archive)).digest('hex')
   state.target = 'mac-arm64'
   state.pnpm = '11.7.0'
+  state.embeddedNode = '24.22.1'
   state.failure = undefined
   process.argv = [process.execPath, 'prepare-runtime.ts']
   vi.stubEnv('DSH_DESKTOP_PACKAGING_RUN_DIR', undefined)
@@ -115,7 +119,7 @@ it.each(['mac-arm64', 'mac-x64', 'win-x64'] as const)('prepares %s with one pnpm
   expect(readFileSync(join(runtime, 'cli', 'command-manager.js'), 'utf8')).toBe('command manager fixture')
   expect(existsSync(join(runtime, 'cli', 'command-path.ps1'))).toBe(true)
   expect(JSON.parse(readFileSync(join(runtime, 'versions.json'), 'utf8'))).toEqual({
-    schemaVersion: 1, node: '24.18.1', pnpm: '11.7.0',
+    schemaVersion: 1, node: '24.22.1', pnpm: '11.7.0',
   })
   expect(state.preparePrimary).toHaveBeenCalledWith({ deferSmoke: windows })
   if (windows) expect(state.commandLink).not.toHaveBeenCalled()
@@ -235,4 +239,13 @@ it.each(['mac-arm64', 'mac-x64'] as const)('keeps %s primary preparation after E
     electron.resolve(undefined)
     await outcome
   }
+})
+
+it('refuses to publish when the Electron binary embeds Node below the security baseline', async () => {
+  state.embeddedNode = '24.22.0'
+  const runtime = join(state.root, 'runtime')
+  mkdirSync(runtime, { recursive: true })
+  await expect(import('../scripts/prepare-runtime.ts'))
+    .rejects.toThrow(/below the 24\.22\.1 security baseline/u)
+  expect(existsSync(join(runtime, 'versions.json'))).toBe(false)
 })
