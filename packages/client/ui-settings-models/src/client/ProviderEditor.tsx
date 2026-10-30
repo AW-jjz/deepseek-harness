@@ -435,6 +435,11 @@ export function ProviderEditor(props: ProviderEditorProps): ReactNode {
               onChange={(event) => { setKeyDraft(event.target.value) }}
             />
             {credentialHint === undefined ? null : <p id={`${props.provider}-credential-hint`} className={styles[missingRefs ? 'notice' : detectedRef === undefined ? 'advancedHint' : 'savedNotice']}>{credentialHint}</p>}
+            {/* The stored key's threat model is not visible anywhere else in the
+                product: a plain file that every process sharing this local
+                account can read. Say it where the key is stored, and say what
+                turning on encryption costs, so the choice can be made here. */}
+            {savedCredential ? <p className={styles['advancedHint']}>{t('keyStorageNotice')}</p> : null}
             {shownKeyFailure === undefined ? null : <p className={styles['error']}>{t(shownKeyFailure)}</p>}
           </div>}
         {props.credentialOnly === true ? null : <details className={styles['customized']}>

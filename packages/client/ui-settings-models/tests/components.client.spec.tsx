@@ -2248,6 +2248,16 @@ it('refreshes a blank editor from saved credentials to environment detection wit
   expect(face.credentials.describe).toHaveBeenCalledTimes(reads + 1)
 })
 
+it.each([
+  ['a stored key', { configured: true, source: 'file', writable: true }],
+  ['an environment key', { configured: true, source: 'env', writable: true }],
+] as const)('states the storage threat model only for %s', (_label, credential) => {
+  renderPiAiEditor('openai', piAiNamespaceWith('openai', { apiKeyEnv: 'OPENAI_API_KEY' }), { credential })
+  const notice = screen.queryByText(en.keyStorageNotice)
+  if (credential.source === 'file') expect(notice).toBeTruthy()
+  else expect(notice).toBeNull()
+})
+
 it('keeps an OAuth-only provider on its native authentication path', () => {
   renderPiAiEditor('openai-codex', wireNamespaces().find(view => view.ns === 'llm-pi-ai')!, {
     nativeAuth: { env: [], oauth: true },
