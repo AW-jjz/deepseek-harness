@@ -125,6 +125,7 @@ export const SERVICE_PAGE: Record<string, string> = {
   settings: 'settings.md',
   sessionTitle: 'session-title.md',
   skills: 'skills.md',
+  skillApprovals: 'skills.md',
   spillStore: 'spill.md',
   storage: 'storage.md',
   storageDomain: 'storage.md',
@@ -916,6 +917,9 @@ export const FOUNDATION_TYPE_NAMES: ReadonlySet<string> = new Set([
 
 /** Project types deliberately documented outside the subsystems catalog. */
 export const TYPE_LINK_EXEMPTIONS: Readonly<Record<string, string>> = {
+  SkillApprovalEntry: 'packages/skill/skill-filesystem/README.md',
+  SkillApprovalStore: 'packages/skill/skill-filesystem/README.md',
+  SkillApprovalGate: 'packages/skill/skill-filesystem/README.md',
   ActionCardDecision: 'packages/experimental/action-cards/README.md',
   ActionCardKind: 'packages/experimental/action-cards/README.md',
   ActionCardResult: 'packages/experimental/action-cards/README.md',

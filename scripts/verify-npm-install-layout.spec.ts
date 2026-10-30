@@ -123,7 +123,7 @@ describe('resolution work budget', () => {
   })
 
   it('accepts a graph exactly at the budget and rejects one internal edge above it', () => {
-    const packages = 350
+    const packages = 360
     const edgesAtBudget = Math.floor(MAX_RESOLUTION_WORK_UNITS / packages)
 
     expect(packages * edgesAtBudget).toBe(MAX_RESOLUTION_WORK_UNITS)
@@ -139,6 +139,6 @@ describe('resolution work budget', () => {
     expect(assertResolutionWorkBudget({ dshPackagesPerVersion: 300, checkedDshEdges: 2800 }))
       .toBe(840_000)
     expect(() => assertResolutionWorkBudget({ dshPackagesPerVersion: 400, checkedDshEdges: 3000 }))
-      .toThrow('400 package(s) per release x 3000 internal edge(s) = 1200000 unit(s), budget 875000 unit(s)')
+      .toThrow('400 package(s) per release x 3000 internal edge(s) = 1200000 unit(s), budget 900000 unit(s)')
   })
 })

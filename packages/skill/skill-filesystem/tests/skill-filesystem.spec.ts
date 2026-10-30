@@ -783,6 +783,29 @@ describe('FileSystemSkillProvider', () => {
     await noWatch.skills.list({ cwd: second })
   })
 
+  it('reports a fallback approval store it cannot read instead of failing discovery', async () => {
+    const home = await tempDir('skill-approval-fallback-unreadable')
+    await mkdir(join(home, '.dsh/skill-approvals.json'), { recursive: true })
+    const ctx = new Context()
+    await ctx.plugin(SkillRegistry)
+    const warnings: string[] = []
+    ctx.logger.warn = ((message: unknown) => { warnings.push(String(message)) }) as typeof ctx.logger.warn
+    // No gate passed in: the provider builds its own store, and that store must
+    // fail closed while still telling the user the record is unreadable.
+    const provider = new SkillFileSystem.FileSystemSkillProvider(
+      ctx,
+      { invalidate: () => {}, signal: new AbortController().signal },
+      { dshHome: join(home, '.dsh'), agentsHome: join(home, '.agents'), watch: false, requireProjectSkillApproval: true },
+    )
+
+    const project = await tempDir('skill-approval-fallback-project')
+    await mkdir(join(project, '.git'), { recursive: true })
+    await writeSkill(join(project, '.dsh/skills'), 'fallback-skill', 'Fallback skill')
+    const listed = await provider.list({ cwd: project })
+    expect((Array.isArray(listed) ? listed : listed.candidates).map(skill => skill.name)).toEqual(['fallback-skill'])
+    expect(warnings.some(message => message.includes('skill-filesystem: skill approvals unreadable'))).toBe(true)
+    await provider.dispose()
+  })
   it('contains repeated disposal and late first-party observations', async () => {
     const home = await tempDir('skill-watch-dispose')
     const nonDirectoryRoot = join(home, 'not-a-directory')

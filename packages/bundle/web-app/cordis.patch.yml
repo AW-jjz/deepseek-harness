@@ -535,6 +535,13 @@
 - id: tool-skill
   disabled: true
 
+# The human `/skills` command follows the provider that owns the approval
+# record: a host-plane copy could not resolve `ctx.skillApprovals` at all, so
+# presets mount it beside their own `skill-filesystem`.
+
+- id: command-skill
+  disabled: true
+
 # The goal service and session driver stay on the host plane, where Gateway
 # remotes resolve them. Presets own the human command and model-facing tool.
 

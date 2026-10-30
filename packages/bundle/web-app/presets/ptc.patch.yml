@@ -36,8 +36,12 @@
             name: '@deepseek-ai/dsh-tool-schedule'
           - id: skill-filesystem
             name: '@deepseek-ai/dsh-skill-filesystem'
+            config:
+              requireProjectSkillApproval: true
           - id: tool-skill
             name: '@deepseek-ai/dsh-tool-skill'
+          - id: command-skill
+            name: '@deepseek-ai/dsh-command-skill'
           - id: command-goal
             name: '@deepseek-ai/dsh-command-goal'
           - id: tool-goal

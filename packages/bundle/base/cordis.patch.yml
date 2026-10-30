@@ -309,8 +309,18 @@
     - id: skill
       name: '@deepseek-ai/dsh-skill'
 
+    # A project skill root (`.dsh/skills`, `.agents/skills`) is authored by
+    # whoever owns the checked-out repository, so discovery alone must not hand
+    # those instructions to a model. With the requirement on, such a skill stays
+    # in the user-facing catalog but is withheld from models until a human
+    # approves that exact content with `/skills approve <name>`; editing it
+    # (including by a `git pull`) voids the approval. Decisions live in
+    # $DSH_HOME/skill-approvals.json. The command ships in this same layer, so a
+    # user is never left with withheld skills and no way to enable them.
     - id: skill-filesystem
       name: '@deepseek-ai/dsh-skill-filesystem'
+      config:
+        requireProjectSkillApproval: true
 
     - id: tool-skill
       name: '@deepseek-ai/dsh-tool-skill'
@@ -320,6 +330,9 @@
 
     - id: command-feedback
       name: '@deepseek-ai/dsh-command-feedback'
+
+    - id: command-skill
+      name: '@deepseek-ai/dsh-command-skill'
 
     - id: goal
       name: '@deepseek-ai/dsh-goal'

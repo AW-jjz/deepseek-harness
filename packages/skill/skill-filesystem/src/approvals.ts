@@ -147,11 +147,6 @@ export class SkillApprovalStore implements SkillApprovalGate {
     this.onChange = options.onChange
   }
 
-  /** Whether approvals are required at all. */
-  get required(): boolean {
-    return this.enabled
-  }
-
   /**
    * Whether an exact-content approval exists for one project skill.
    * @param root - project root owning the skill root.
@@ -236,10 +231,12 @@ export class SkillApprovalStore implements SkillApprovalGate {
       key = `${info.mtimeMs}:${info.size}`
       if (this.cached?.key === key) return this.cached.document
     } catch (error) {
+      // A remembered absent document means this failure already surfaced; one
+      // warning per broken store is enough when every catalog read asks again.
+      if (this.cached?.key === '') return this.cached.document
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
         this.logger?.(`skill approvals unreadable at ${this.file}: ${String(error)}`)
       }
-      if (this.cached?.key === '') return this.cached.document
       const absent = emptyDocument()
       this.cached = { key: '', document: absent }
       return absent
@@ -259,7 +256,7 @@ export class SkillApprovalStore implements SkillApprovalGate {
     }
     let document: StoreDocument
     try {
-      document = readDocument(JSON.parse(text) as unknown)
+      document = readDocument(JSON.parse(text))
     } catch (error) {
       // A corrupt store must fail closed and stay recoverable by an approval
       // written later, so it is replaced rather than trusted or deleted.

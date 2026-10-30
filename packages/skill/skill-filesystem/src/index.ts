@@ -264,6 +264,7 @@ export class FileSystemSkillProvider implements SkillProvider {
       provider: this.name,
       resourceBase: { kind: 'directory', path: locator.directory },
       path: parsed.path,
+      contentDigest: parsed.digest,
       ...parsed.metadata !== undefined ? { metadata: parsed.metadata } : {},
       content: parsed.content,
     }
@@ -289,7 +290,7 @@ export class FileSystemSkillProvider implements SkillProvider {
   private async roots(cwd: string | undefined): Promise<SkillRoot[]> {
     const roots: SkillRoot[] = []
     if (this.includeDefaultRoots && cwd !== undefined) {
-      const projectRoot = await findProjectRoot(resolve(cwd), optionalFileSystem(this.ctx))
+      const projectRoot = await resolveProjectSkillRoot(this.ctx, cwd)
       roots.push(
         { path: join(projectRoot, '.dsh/skills'), source: 'project-dsh', rank: PROJECT_DSH_RANK, projectRoot },
         { path: join(projectRoot, '.agents/skills'), source: 'project-agents', rank: PROJECT_AGENTS_RANK, projectRoot },
@@ -804,6 +805,7 @@ async function discoverRoot(
       locator,
       resourceBase: { kind: 'directory', path: locator.directory },
       path: parsed.path,
+      contentDigest: parsed.digest,
       ...parsed.metadata !== undefined ? { metadata: parsed.metadata } : {},
     })
   }
@@ -1035,6 +1037,21 @@ function findClosingFrontmatter(raw: string, start: number): { start: number; bo
     if (nextNewline < 0) return undefined
     lineStart = nextNewline + 1
   }
+}
+
+/**
+ * Resolve the project root that owns the project skill roots for one session
+ * directory: the nearest ancestor carrying a `.git` entry, or `cwd` itself.
+ *
+ * Discovery and a recorded approval must agree on this value, because approvals
+ * are stored per project root. A consumer that recomputed it with its own walk
+ * could pin a decision to a root discovery never reports, so it calls this.
+ * @param ctx - context whose optional filesystem service discovery reads through.
+ * @param cwd - absolute session working directory.
+ * @returns absolute project root that owns `.dsh/skills` and `.agents/skills`.
+ */
+export async function resolveProjectSkillRoot(ctx: Context, cwd: string): Promise<string> {
+  return await findProjectRoot(resolve(cwd), optionalFileSystem(ctx))
 }
 
 async function findProjectRoot(cwd: string, fs: FileSystem | undefined): Promise<string> {

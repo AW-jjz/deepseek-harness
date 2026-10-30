@@ -212,5 +212,120 @@ describe('SkillApprovalStore', () => {
 
     expect(await store.isApproved('C:\\repo', 'alpha', 'anything')).toBe(true)
   })
+
+  it('fails closed and keeps reporting when the store path cannot be examined', async () => {
+    const home = await tempDir('approval-store-unstatable-home')
+    // A path the platform itself refuses to examine: not "no store yet" (that
+    // is ENOENT) but a failure the user needs to hear about, and one that must
+    // still fail closed instead of throwing into discovery.
+    const messages: string[] = []
+    const store = new SkillApprovalStore({
+      dshHome: join(home, 'in\u0000valid'),
+      enabled: true,
+      logger: message => messages.push(message),
+    })
+
+    expect(await store.isApproved('C:\\repo', 'alpha', 'digest-a')).toBe(false)
+    // The second read takes the remembered-absent branch instead of re-reporting.
+    expect(await store.isApproved('C:\\repo', 'alpha', 'digest-a')).toBe(false)
+    expect(messages).toHaveLength(1)
+    expect(messages[0]).toContain('skill approvals unreadable')
+  })
+
+  it('reports a revoke that matched no project record', async () => {
+    const home = await tempDir('approval-store-empty-revoke-home')
+    await mkdir(home, { recursive: true })
+    const store = new SkillApprovalStore({ dshHome: home, enabled: true })
+
+    expect(await store.revoke('C:\\\\nowhere', 'alpha')).toBe(false)
+    expect(await store.revoke('C:\\\\nowhere')).toBe(false)
+  })
+
+  it('surfaces a failed write to the caller and keeps reading fail-closed', async () => {
+    const home = await tempDir('approval-store-unwritable-home')
+    // A regular file where the store's parent directory should be: mkdir cannot
+    // create the hierarchy, so the staged write fails before any rename.
+    const blocked = join(home, 'blocked')
+    await writeFile(blocked, 'not a directory\n')
+    const store = new SkillApprovalStore({ dshHome: join(blocked, 'nested'), enabled: true })
+
+    await expect(store.approve('C:\\\\repo', 'alpha', 'digest-a')).rejects.toThrow()
+    expect(await store.isApproved('C:\\\\repo', 'alpha', 'digest-a')).toBe(false)
+  })
+  it('keeps case-distinct project keys where paths are case-sensitive', async () => {
+    const home = await tempDir('approval-store-posix-home')
+    await mkdir(home, { recursive: true })
+    const store = new SkillApprovalStore({ dshHome: home, enabled: true })
+    const platform = Object.getOwnPropertyDescriptor(process, 'platform')
+    // The Windows fold must not leak onto a case-sensitive host: two spellings
+    // there are two projects, and merging them would enact a decision the user
+    // never made for the other one.
+    Object.defineProperty(process, 'platform', { value: 'linux', configurable: true })
+    try {
+      await store.approve('C:\\\\Repo', 'alpha', 'digest-a')
+      expect(await store.isApproved('C:\\\\Repo', 'alpha', 'digest-a')).toBe(true)
+      expect(await store.isApproved('C:\\\\repo', 'alpha', 'digest-a')).toBe(false)
+    } finally {
+      if (platform !== undefined) Object.defineProperty(process, 'platform', platform)
+    }
+  })
+  it('ignores a store written by an unknown schema version', async () => {
+    const home = await tempDir('approval-store-version-home')
+    await mkdir(home, { recursive: true })
+    // A newer writer's document: readable JSON, unknown semantics. Trusting it
+    // would enforce decisions this build cannot interpret, so it reads as empty.
+    await writeFile(join(home, 'skill-approvals.json'), JSON.stringify({
+      version: 2,
+      projects: { 'C:\\repo': { root: 'C:\\repo', skills: { alpha: { sha256: 'digest-a', approvedAt: 'now' } } } },
+    }))
+    const store = new SkillApprovalStore({ dshHome: home, enabled: true })
+
+    expect(await store.list('C:\\repo')).toEqual({})
+  })
+
+  it('drops entries and projects whose stored shape is incomplete', async () => {
+    const home = await tempDir('approval-store-shape-home')
+    await mkdir(home, { recursive: true })
+    // Keys fold case on Windows, so a fixture key must match the folded lookup.
+    const key = (root: string): string => process.platform === 'win32' ? root.toLowerCase() : root
+    await writeFile(join(home, 'skill-approvals.json'), JSON.stringify({
+      version: 1,
+      projects: {
+        [key('C:\\repo')]: { root: 'C:\\repo', skills: { good: { sha256: 'd', approvedAt: 'now' }, partial: { sha256: 'd' } } },
+        [key('C:\\stringly')]: 'not a project',
+        [key('C:\\recordless')]: { root: 'C:\\recordless', skills: 'not skills' },
+      },
+    }))
+    const store = new SkillApprovalStore({ dshHome: home, enabled: true })
+
+    expect(Object.keys(await store.list('C:\\repo'))).toEqual(['good'])
+    expect(await store.list('C:\\stringly')).toEqual({})
+    expect(await store.list('C:\\recordless')).toEqual({})
+  })
+
+  it('fails closed when an absent store stays absent across reads', async () => {
+    const home = await tempDir('approval-store-absent-home')
+    await mkdir(home, { recursive: true })
+    const store = new SkillApprovalStore({ dshHome: home, enabled: true })
+
+    // No store file yet: the first read answers "nothing approved", and the
+    // second takes the remembered-absent branch.
+    expect(await store.isApproved('C:\\repo', 'alpha', 'digest-a')).toBe(false)
+    expect(await store.isApproved('C:\\repo', 'alpha', 'digest-a')).toBe(false)
+  })
+
+  it('fails closed when the store file is readable as a path but not as text', async () => {
+    const home = await tempDir('approval-store-directory-home')
+    await mkdir(join(home, 'skill-approvals.json'), { recursive: true })
+    const messages: string[] = []
+    const store = new SkillApprovalStore({
+      dshHome: home,
+      enabled: true,
+      logger: message => messages.push(message),
+    })
+
+    expect(await store.list('C:\\repo')).toEqual({})
+    expect(messages.some(message => message.includes('skill-approvals.json'))).toBe(true)
+  })
 })
 

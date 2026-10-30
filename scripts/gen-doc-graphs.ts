@@ -650,6 +650,14 @@ const SERVICE_ROLES: ServiceRole[] = [
     note: 'Merges provider skill catalogs; tool-skill renders the session-prefix catalog and loads complete skill bodies.',
   },
   {
+    key: 'skillApprovals',
+    pkg: 'skill-filesystem',
+    title: 'Project skill approval record',
+    mode: 'seam',
+    implementations: ['skill-filesystem'],
+    consumers: ['command-skill'],
+    note: 'Records which project-local skills a human enabled for models and pins each decision to the approved content digest.',
+  },  {
     key: 'agents',
     pkg: 'agent',
     title: 'Agent service',

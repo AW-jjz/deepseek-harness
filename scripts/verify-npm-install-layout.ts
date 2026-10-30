@@ -29,8 +29,13 @@ const DEPENDENCY_FIELDS = ['dependencies', 'optionalDependencies', 'peerDependen
  * for ordinary product growth, so a graph that grows here fails with its own
  * measured counts instead of failing on whichever runner happens to be slow.
  * Raising it requires re-measuring the resolution and recording the new counts.
+ *
+ * Re-measured when the skill approval command joined the base, preset, and CLI
+ * closures: 316 package(s) x 2792 internal edge(s) = 882,272 unit(s). The budget
+ * above is that count with the same 2% headroom on top, so the next package
+ * that widens the closure still fails here with its own numbers.
  */
-export const MAX_RESOLUTION_WORK_UNITS = 875_000
+export const MAX_RESOLUTION_WORK_UNITS = 900_000
 
 /**
  * Measured npm seconds per resolution work unit on the reference host: 180.66 s

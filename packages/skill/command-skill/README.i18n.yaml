@@ -1,0 +1,64 @@
+# Bilingual-pair consistency record for README.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write packages/skill/command-skill/README.md
+/:
+  en: be0c1c206b49bfbc
+  zh: ac492176e3cf313c
+/deepseek-ai-dsh-command-skill:
+  en: ae0cd7d4c9a6a0b7
+  zh: 7dd108ccdf346dee
+/deepseek-ai-dsh-command-skill/summary:
+  en: bb621d533f1f8415
+  zh: be07e901c86e7055
+/deepseek-ai-dsh-command-skill/table-of-contents:
+  en: d152484eb41ac6b4
+  zh: 7cade1e9312d6e16
+/deepseek-ai-dsh-command-skill/use-this-package:
+  en: 09b5a0f406452c23
+  zh: 517462d6bd22443a
+/deepseek-ai-dsh-command-skill/use-this-package/the-three-states:
+  en: 179cf1d1ff875fa1
+  zh: da6c639729f86ce9
+/deepseek-ai-dsh-command-skill/use-this-package/commands:
+  en: 0f7736227f70c8e7
+  zh: 64ae4bef64c8d849
+/deepseek-ai-dsh-command-skill/use-this-package/composing-the-command:
+  en: 7252ccc2641deec9
+  zh: 0283729c843b9e7a
+/deepseek-ai-dsh-command-skill/understand-the-implementation:
+  en: 42b15ac6321706aa
+  zh: 43dd0daffdffd075
+/deepseek-ai-dsh-command-skill/understand-the-implementation/design-concept:
+  en: 65f09419a3fe5e53
+  zh: 25d4b81f3be1accf
+/deepseek-ai-dsh-command-skill/understand-the-implementation/how-one-decision-travels:
+  en: 741856e6045cc3b7
+  zh: 9ad49b6c162b81d6
+/deepseek-ai-dsh-command-skill/understand-the-implementation/source-map:
+  en: 7510c34ba52ebe31
+  zh: a9ea2ca03bacb004
+/deepseek-ai-dsh-command-skill/further-exploration:
+  en: c823a30a4bfed2ea
+  zh: 70a8a7696d3af08f
+/deepseek-ai-dsh-command-skill/model-experience:
+  en: 215e7ba838619b7b
+  zh: a311da3843709f90
+/deepseek-ai-dsh-command-skill/model-experience/human-skills-control:
+  en: 5f279cf9998fa01c
+  zh: d1e4b3816a7b1604
+/deepseek-ai-dsh-command-skill/model-experience/human-skills-control/what-the-model-sees:
+  en: beafbd112062b00f
+  zh: 933152a776de0757
+/deepseek-ai-dsh-command-skill/model-experience/human-skills-control/token-effect:
+  en: dc21f45ae10b4273
+  zh: 1af7513e915f0e3f
+/deepseek-ai-dsh-command-skill/model-experience/human-skills-control/kv-cache-effect:
+  en: bc321f7285a1c62d
+  zh: 4948477d43fd687a
+/deepseek-ai-dsh-command-skill/known-limitations-and-deferred-work:
+  en: f1ca1f6144a8d1da
+  zh: dbca8dd84aac07d5
+/deepseek-ai-dsh-command-skill/known-limitations-and-deferred-work/dev-note:
+  en: dd1a25c427eea2f7
+  zh: 1457eb14bfebbc79

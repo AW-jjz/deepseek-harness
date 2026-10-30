@@ -3019,6 +3019,47 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     ],
   },
   {
+    key: 'skillApprovals',
+    summary: 'File-backed approval store shared by the discovering provider and the human-facing command that writes decisions.',
+    description: 'File-backed approval store shared by the discovering provider and the human-facing command that writes decisions.\n\nReads are cached after the first successful load; writes are serialized so a concurrent approve/revoke pair cannot interleave read-modify-write cycles. Failures never throw into discovery: an unreadable store reads as "nothing approved", which fails closed.',
+    methods: [
+      {
+        signature: 'readonly file: string',
+        description: 'Absolute path of the backing JSON file.',
+        parameters: [],
+      },
+      {
+        signature: 'readonly enabled: boolean',
+        description: 'Whether a recorded approval is required before a project skill reaches a model.',
+        parameters: [],
+      },
+      {
+        signature: 'async isApproved(root: string, name: string, digest: string): Promise<boolean>',
+        description: 'Whether an exact-content approval exists for one project skill.',
+        parameters: [{ name: 'root', description: 'project root owning the skill root.' }, { name: 'name', description: 'skill name.' }, { name: 'digest', description: 'digest of the decoded instruction file.' }],
+        returns: 'whether the gate is disabled or the stored digest matches.',
+      },
+      {
+        signature: 'async approve(root: string, name: string, digest: string): Promise<SkillApprovalEntry>',
+        description: 'Record approval of one project skill at its current content digest.',
+        parameters: [{ name: 'root', description: 'project root owning the skill root.' }, { name: 'name', description: 'skill name.' }, { name: 'digest', description: 'digest of the decoded instruction file.' }],
+        returns: 'the recorded entry.',
+      },
+      {
+        signature: 'async revoke(root: string, name?: string): Promise<boolean>',
+        description: 'Drop one project skill\'s approval, or every approval under one project.',
+        parameters: [{ name: 'root', description: 'project root owning the skill root.' }, { name: 'name', description: 'skill name, or `undefined` to revoke the whole project.' }],
+        returns: 'whether a record was removed.',
+      },
+      {
+        signature: 'async list(root: string): Promise<Readonly<Record<string, SkillApprovalEntry>>>',
+        description: 'List the approvals recorded for one project.',
+        parameters: [{ name: 'root', description: 'project root owning the skill root.' }],
+        returns: 'approved entries by skill name.',
+      },
+    ],
+  },
+  {
     key: 'skills',
     summary: 'Layered registry of skill providers, the host+per-scope shape the tools registry established.',
     description: 'Layered registry of skill providers, the host+per-scope shape the tools registry established. A registration files into the layer of its calling context\'s scope (scopeOf): host rows and repository plugins land in the global layer, while a plugin mounted by an agent preset\'s standing composition lands in that preset\'s layer. A read merges the global layer with the viewing scope\'s chain — the nearest layer\'s entry wins a duplicate name outright, and the rank order decides duplicates only within one layer. It exposes sorted invocation-neutral summaries and loads full skill bodies on demand.',
@@ -8118,6 +8159,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export type SignInErrorCode = \'no-response\' | \'network\' | \'protocol\' | \'expired\' | \'storage\';',
   },
   {
+    name: 'SkillApprovalEntry',
+    declaration: 'export interface SkillApprovalEntry {\n    readonly sha256: string;\n    readonly approvedAt: string;\n}',
+  },
+  {
     name: 'SkillCandidate',
     declaration: 'export interface SkillCandidate extends SkillSummary {\n    readonly rank: number;\n    readonly locator: unknown;\n    readonly metadata?: Readonly<Record<string, unknown>>;\n}',
   },
@@ -8175,7 +8220,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'SkillSummary',
-    declaration: 'export interface SkillSummary {\n    readonly path?: string;\n    readonly name: string;\n    readonly description: string;\n    readonly whenToUse?: string;\n    readonly invocation: SkillInvocationPolicy;\n    readonly source: SkillSource;\n    readonly provider: string;\n    readonly resourceBase?: SkillResourceBase;\n}',
+    declaration: 'export interface SkillSummary {\n    readonly path?: string;\n    readonly name: string;\n    readonly description: string;\n    readonly whenToUse?: string;\n    readonly invocation: SkillInvocationPolicy;\n    readonly source: SkillSource;\n    readonly provider: string;\n    readonly resourceBase?: SkillResourceBase;\n    readonly contentDigest?: string;\n}',
   },
   {
     name: 'SkillViewOptions',

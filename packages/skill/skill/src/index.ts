@@ -71,6 +71,13 @@ export interface SkillSummary {
   readonly provider: string
   /** Provider-specific base for relative resources. */
   readonly resourceBase?: SkillResourceBase
+  /**
+   * Digest of the instruction text this provider parsed, when it can compute one.
+   * A consumer that records a content-bound decision — a project skill approval,
+   * an audit trail — pins this value instead of re-reading the file through a
+   * second discovery path that could decode it differently.
+   */
+  readonly contentDigest?: string
 }
 
 /** Provider catalog entry used by the registry to merge and later load skills. */
@@ -701,6 +708,7 @@ function runtimeCandidate(skill: SkillDefinition): SkillCandidate {
     locator: skill,
     ...skill.path !== undefined ? { path: skill.path } : {},
     ...skill.metadata !== undefined ? { metadata: skill.metadata } : {},
+    ...skill.contentDigest === undefined ? {} : { contentDigest: skill.contentDigest },
   }
 }
 
@@ -777,6 +785,7 @@ function toSummary(skill: SkillDefinition | SkillCandidate): SkillSummary {
     source,
     provider,
     ...resourceBase !== undefined ? { resourceBase } : {},
+    ...skill.contentDigest === undefined ? {} : { contentDigest: skill.contentDigest },
   }
 }
 

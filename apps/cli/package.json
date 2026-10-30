@@ -35,6 +35,7 @@
     "@deepseek-ai/dsh-cmdline": "workspace:*",
     "@deepseek-ai/dsh-command-compact": "workspace:*",
     "@deepseek-ai/dsh-command-goal": "workspace:*",
+    "@deepseek-ai/dsh-command-skill": "workspace:*",
     "@deepseek-ai/dsh-compaction-basic": "workspace:*",
     "@deepseek-ai/dsh-compaction-tool-result-pruner": "workspace:*",
     "@deepseek-ai/dsh-cordis-client-runner": "workspace:*",

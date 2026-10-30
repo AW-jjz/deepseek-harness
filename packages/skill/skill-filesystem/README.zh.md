@@ -55,7 +55,7 @@ skill 可以是被扫描根目录顶层的目录 bundle `<name>/SKILL.md`，也�
 
 项目根目录是包含 `.git` 的最近祖先目录；如果不存在，则使用当前 cwd。用户 DSH 根目录会跳过其 `.system` 子目录。`includeDefaultRoots: false` 会省略项目根、用户根以及 `$DSH_BUNDLED_SKILL_DIR` 默认值，使隔离提供方只看到自身配置的根；`bundledSkillDir` 会按 rank 600 添加一个随包提供的根目录。
 
-项目根是唯一一类本提供方可以要求批准的根。检出目录由写下它的人编写，因此可以要求发现阶段不要把它的指令交给模型：开启 `requireProjectSkillApproval: true` 后，发现到的项目 skill 仍会列给用户，但在有人批准那一份确切文件之前一律带 `modelInvocable: false`——模型目录与加载器都不会返回它。批准以「项目根 + skill 名」为键，并绑定到解码后指令文件的 SHA-256，因此编辑已批准的 skill（或拉取修改了它的提交）会作废该决定，让 skill 回到待批准状态，而不是沿用上一次批准的信任。决定存放在 `<dshHome>/skill-approvals.json`，可通过 `ctx.skillApprovals` 服务读写（`SkillApprovalStore`）。本层默认值为 `false`：记录决定的人机命令作为独立插件发布，组合在挂载它之后才开启该要求。
+项目根是唯一一类本提供方可以要求批准的根。检出目录由写下它的人编写，因此可以要求发现阶段不要把它的指令交给模型：开启 `requireProjectSkillApproval: true` 后，发现到的项目 skill 仍会列给用户，但在有人批准那一份确切文件之前一律带 `modelInvocable: false`——模型目录与加载器都不会返回它。批准以「项目根 + skill 名」为键，并绑定到解码后指令文件的 SHA-256，因此编辑已批准的 skill（或拉取修改了它的提交）会作废该决定，让 skill 回到待批准状态，而不是沿用上一次批准的信任。决定存放在 `<dshHome>/skill-approvals.json`，可通过 `ctx.skillApprovals` 服务读写（`SkillApprovalStore`）；单条记录是一个 `SkillApprovalEntry`——被批准的 SHA-256 与该决定的时刻。本包层默认值为 `false`：记录决定的人机 `/skills` 命令作为独立插件发布（`dsh-command-skill`），随附的 base bundle 与所有随附 agent 预设会同时挂载两者并开启该要求。
 
 ### 挂载与配置
 

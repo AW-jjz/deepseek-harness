@@ -417,6 +417,7 @@
       "@deepseek-ai/dsh-command-compact": ["./packages/compaction/command-compact/src"],
       "@deepseek-ai/dsh-command-feedback": ["./packages/feedback/command-feedback/src"],
       "@deepseek-ai/dsh-command-goal": ["./packages/goal/command-goal/src"],
+      "@deepseek-ai/dsh-command-skill": ["./packages/skill/command-skill/src"],
       "@deepseek-ai/dsh-commands": ["./packages/interaction/commands/src"],
       "@deepseek-ai/dsh-compaction": ["./packages/compaction/compaction/src"],
       "@deepseek-ai/dsh-compaction-basic": ["./packages/compaction/compaction-basic/src"],

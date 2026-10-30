@@ -1044,6 +1044,24 @@ describe('SkillRegistry registry', () => {
   })
 })
 
+it('carries a provider-supplied content digest into every summary', async () => {
+  const ctx = new Context()
+  await ctx.plugin(SkillRegistry)
+  ctx.skills.register({
+    name: 'digest-runtime',
+    description: 'Runtime skill with a pinned digest',
+    source: 'runtime',
+    content: 'Digest runtime body.',
+    contentDigest: 'digest-of-the-instruction-text',
+  })
+
+  const listed = (await ctx.skills.list()).find(skill => skill.name === 'digest-runtime')
+  expect(listed?.contentDigest).toBe('digest-of-the-instruction-text')
+  // A contribution without one reports no digest rather than an invented value.
+  ctx.skills.register({ name: 'plain-runtime', description: 'No digest', source: 'runtime', content: 'Body.' })
+  const plain = (await ctx.skills.list()).find(skill => skill.name === 'plain-runtime')
+  expect(plain?.contentDigest).toBeUndefined()
+})
 describe('renderSkillContent', () => {
   it('renders a directory-based skill with the shared wrapper', () => {
     const text = renderSkillContent({

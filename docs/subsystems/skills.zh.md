@@ -122,6 +122,13 @@ interface SkillSummary {
   readonly provider: string
   /** Provider-specific base for relative resources. */
   readonly resourceBase?: SkillResourceBase
+  /**
+   * Digest of the instruction text this provider parsed, when it can compute one.
+   * A consumer that records a content-bound decision — a project skill approval,
+   * an audit trail — pins this value instead of re-reading the file through a
+   * second discovery path that could decode it differently.
+   */
+  readonly contentDigest?: string
 }
 ```
 
@@ -262,6 +269,51 @@ Host service backing `ctx.remote.skills` without activating a cold Agent.
 ```
 
 Source: [`packages/api/session-controller/src/skill-catalog.ts`](../../packages/api/session-controller/src/skill-catalog.ts)
+
+<a id="ctxskillapprovals--skillapprovalstore"></a>
+
+### `ctx.skillApprovals` — `SkillApprovalStore`
+
+File-backed approval store shared by the discovering provider and the human-facing command that writes decisions.
+
+Reads are cached after the first successful load; writes are serialized so a concurrent approve/revoke pair cannot interleave read-modify-write cycles. Failures never throw into discovery: an unreadable store reads as "nothing approved", which fails closed.
+
+```ts cordis-catalog
+/**
+ * Whether an exact-content approval exists for one project skill.
+ * @param root - project root owning the skill root.
+ * @param name - skill name.
+ * @param digest - digest of the decoded instruction file.
+ * @returns whether the gate is disabled or the stored digest matches.
+ */
+async isApproved(root: string, name: string, digest: string): Promise<boolean>
+
+/**
+ * Record approval of one project skill at its current content digest.
+ * @param root - project root owning the skill root.
+ * @param name - skill name.
+ * @param digest - digest of the decoded instruction file.
+ * @returns the recorded entry.
+ */
+async approve(root: string, name: string, digest: string): Promise<SkillApprovalEntry>
+
+/**
+ * Drop one project skill's approval, or every approval under one project.
+ * @param root - project root owning the skill root.
+ * @param name - skill name, or `undefined` to revoke the whole project.
+ * @returns whether a record was removed.
+ */
+async revoke(root: string, name?: string): Promise<boolean>
+
+/**
+ * List the approvals recorded for one project.
+ * @param root - project root owning the skill root.
+ * @returns approved entries by skill name.
+ */
+async list(root: string): Promise<Readonly<Record<string, SkillApprovalEntry>>>
+```
+
+Source: [`packages/skill/skill-filesystem/src/approvals.ts`](../../packages/skill/skill-filesystem/src/approvals.ts)
 
 <a id="ctxskills--skillregistry"></a>
 

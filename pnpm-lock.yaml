@@ -316,6 +316,9 @@ importers:
       '@deepseek-ai/dsh-command-goal':
         specifier: workspace:*
         version: link:../../packages/goal/command-goal
+      '@deepseek-ai/dsh-command-skill':
+        specifier: workspace:*
+        version: link:../../packages/skill/command-skill
       '@deepseek-ai/dsh-compaction-basic':
         specifier: workspace:*
         version: link:../../packages/compaction/compaction-basic
@@ -2396,6 +2399,9 @@ importers:
       '@deepseek-ai/dsh-command-goal':
         specifier: workspace:*
         version: link:../../goal/command-goal
+      '@deepseek-ai/dsh-command-skill':
+        specifier: workspace:*
+        version: link:../../skill/command-skill
       '@deepseek-ai/dsh-commands':
         specifier: workspace:*
         version: link:../../interaction/commands
@@ -3126,6 +3132,9 @@ importers:
       '@deepseek-ai/dsh-command-goal':
         specifier: workspace:*
         version: link:../../goal/command-goal
+      '@deepseek-ai/dsh-command-skill':
+        specifier: workspace:*
+        version: link:../../skill/command-skill
       '@deepseek-ai/dsh-compaction-basic':
         specifier: workspace:*
         version: link:../../compaction/compaction-basic
@@ -14750,6 +14759,36 @@ importers:
         specifier: workspace:*
         version: link:../../session/working-directory
 
+  packages/skill/command-skill:
+    devDependencies:
+      '@deepseek-ai/cordis':
+        specifier: workspace:~
+        version: link:../../../vendor/cordis
+      '@deepseek-ai/dsh-agent':
+        specifier: workspace:*
+        version: link:../../core/agent
+      '@deepseek-ai/dsh-agent-loop-testkit':
+        specifier: workspace:*
+        version: link:../../test-support/agent-loop-testkit
+      '@deepseek-ai/dsh-commands':
+        specifier: workspace:*
+        version: link:../../interaction/commands
+      '@deepseek-ai/dsh-session':
+        specifier: workspace:*
+        version: link:../../core/session
+      '@deepseek-ai/dsh-session-projection':
+        specifier: workspace:*
+        version: link:../../session/session-projection
+      '@deepseek-ai/dsh-skill':
+        specifier: workspace:*
+        version: link:../skill
+      '@deepseek-ai/dsh-skill-filesystem':
+        specifier: workspace:*
+        version: link:../skill-filesystem
+      '@deepseek-ai/dsh-working-directory':
+        specifier: workspace:*
+        version: link:../../session/working-directory
+
   packages/skill/skill:
     dependencies:
       '@deepseek-ai/dsh-util-values':
@@ -17168,6 +17207,9 @@ importers:
       '@deepseek-ai/dsh-command-goal':
         specifier: workspace:*
         version: link:../../packages/goal/command-goal
+      '@deepseek-ai/dsh-command-skill':
+        specifier: workspace:*
+        version: link:../../packages/skill/command-skill
       '@deepseek-ai/dsh-commands':
         specifier: workspace:*
         version: link:../../packages/interaction/commands
