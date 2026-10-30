@@ -12,8 +12,8 @@ import {
   evaluatePluginCompatibility, pluginCompatibilityWarning, type ProfileManifest,
 } from '@deepseek-ai/dsh-app-boot'
 import { PROFILE_TEMPLATES, DEFAULT_PROFILE_BUNDLES } from '@deepseek-ai/dsh-official-bundles'
-import { scrubbedParentEnv } from '@deepseek-ai/dsh-subprocess'
 import { parseInstallSpec } from './install-spec.ts'
+import { packageOperationEnvironment } from './install-environment.ts'
 import { awaitTreeGone, leadsOwnGroup, treeAlive, type RunTree } from './run-tree.ts'
 import { incompatiblePlugin } from './failure.ts'
 import type { IncompatiblePlugin, PackageResult, Registry } from './types.ts'
@@ -37,7 +37,7 @@ export interface PackageOperationOptions {
   args?: readonly string[]
   /** Application runtime environment, applied only to this package operation. */
   env?: Readonly<Record<string, string>>
-  /** CLI inherits authentication and terminal descriptors; service scrubs secrets and captures output. */
+  /** CLI inherits the caller's terminal descriptors; both modes scrub credentials ({@link packageOperationEnvironment}). */
   execution: 'cli' | 'service'
   signal?: AbortSignal
   outputBytes: number
@@ -343,7 +343,7 @@ export async function runProfilePnpm(
       output = output.subarray(output.length - options.outputBytes)
     }
   }
-  const environment = { ...(options.execution === 'cli' ? process.env : scrubbedParentEnv()), ...options.env }
+  const environment = packageOperationEnvironment(options.env)
   const restore = async (): Promise<void> => {
     for (const file of savedFiles) {
       if (file.text === undefined) await rm(file.path, { force: true })
@@ -628,7 +628,7 @@ export async function readProfileRegistry(
   dir: string, options: { command?: string; args?: readonly string[]; env?: Readonly<Record<string, string>>; timeoutMs: number },
 ): Promise<string | null> {
   const result = await execa(options.command ?? 'pnpm', [...options.args ?? [], 'config', 'get', 'registry'], {
-    cwd: dir, env: { ...scrubbedParentEnv(), ...options.env }, extendEnv: false, reject: false, stdin: 'ignore', timeout: options.timeoutMs,
+    cwd: dir, env: packageOperationEnvironment(options.env), extendEnv: false, reject: false, stdin: 'ignore', timeout: options.timeoutMs,
   })
   // The registry is the last line: pnpm may print a notice before it.
   const answer = result.exitCode === 0 ? result.stdout.trim().replace(/^[\s\S]*\n/, '').trim() : ''
@@ -660,7 +660,7 @@ export async function viewProfilePackage(dir: string, spec: string, options: Pac
     ...options.args ?? [], 'view', spec, ...options.fields, '--json',
     ...registryArguments(options.registry ?? null), '--config.fetch-retries=0',
   ], {
-    cwd: dir, env: { ...scrubbedParentEnv(), ...options.env }, extendEnv: false, reject: false, stdin: 'ignore',
+    cwd: dir, env: packageOperationEnvironment(options.env), extendEnv: false, reject: false, stdin: 'ignore',
     timeout: options.timeoutMs, ...options.signal === undefined ? {} : { cancelSignal: options.signal },
   })
   const cause = result.exitCode === undefined && !result.timedOut && !result.isCanceled

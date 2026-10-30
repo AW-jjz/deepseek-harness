@@ -889,7 +889,7 @@ it('handles manifests without dependency or bundle selections', async () => {
   expect(await runProfilePnpm(context, ['root'], { execution: 'service', outputBytes: 100 })).toMatchObject({ exitCode: 0 })
 })
 
-it.each(['cli', 'service'] as const)('uses the %s environment and interaction policy', async (execution) => {
+it.each(['cli', 'service'] as const)('gives the %s run a credential-free environment and its own interaction policy', async (execution) => {
   const { context } = fixture()
   const names = ['NPM_TOKEN', 'NODE_AUTH_TOKEN', 'GH_TOKEN', 'GITHUB_TOKEN', 'DEEPSEEK_API_KEY']
   const originals = names.map(name => process.env[name])
@@ -903,7 +903,10 @@ it.each(['cli', 'service'] as const)('uses the %s environment and interaction po
   for (const name of names) process.env[name] = 'fixture-credential'
   await runPluginCommand(context, ['approve-builds'], { execution, outputBytes: 100 })
   const options = command.run.mock.calls[0]?.[2] as { env: NodeJS.ProcessEnv; stdin: string; stdout: string; stderr: string }
-  for (const name of names) expect(options.env[name]).toBe(execution === 'cli' ? 'fixture-credential' : undefined)
+  // Neither entry may hand a package script the ambient credentials: a lifecycle
+  // script runs third-party code, and `dsh plugin install` is exactly how such a
+  // package arrives (audit P1-33). Terminal descriptors still follow the mode.
+  for (const name of names) expect(options.env[name]).toBeUndefined()
   expect(options.stdin).toBe(execution === 'cli' ? 'inherit' : 'ignore')
   expect(options.stdout).toBe(execution === 'cli' ? 'inherit' : 'pipe')
   expect(options.stderr).toBe(execution === 'cli' ? 'inherit' : 'pipe')
