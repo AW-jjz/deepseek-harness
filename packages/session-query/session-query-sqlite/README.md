@@ -9,7 +9,7 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-Use this package to add ranked SQLite FTS5 search across session history, either across sessions or within one session, with cursor pagination. It indexes live and persisted history in a separate derived database, so searches reflect current state without modifying the session-persistence store. Exact reads, filters, and traces remain available through the same query API. The shared base leaves content search off; the Web surface, and therefore Desktop, enables one durable index with background warmup. Configure `openAt` to open the index at startup, on first search, or never. Results match tokens and phrases rather than arbitrary substrings, and each index path has a single process owner.
+Use this package for ranked SQLite FTS5 search across session history, across sessions or within one session, with cursor pagination. It indexes live and persisted history in a separate derived database, so searches reflect current state without touching the session-persistence store. Exact reads, filters, and traces stay available through the same query API. The shared base leaves content search off; the Web surface, and therefore Desktop, enables one durable index with background warmup. `openAt` opens the index at startup, on first search, or never. Results match tokens and phrases, and each index path has a single process owner.
 
 ## Table of Contents
 
