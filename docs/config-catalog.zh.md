@@ -802,7 +802,7 @@ export interface Config {
 
 ## `@deepseek-ai/dsh-credentials-local`
 
-- `source`: [`packages/credentials/credentials-local/src/index.ts:64`](../packages/credentials/credentials-local/src/index.ts)
+- `source`: [`packages/credentials/credentials-local/src/index.ts:67`](../packages/credentials/credentials-local/src/index.ts)
 
 ```ts config-catalog
 /** Plugin config: file location and hot-reload behavior. */
@@ -815,6 +815,14 @@ export interface Config {
   watch?: boolean
   /** Watcher write-settle window in milliseconds; defaults to 100. */
   debounceMs?: number
+  /**
+   * Wrap every write in a Windows DPAPI envelope (CurrentUser scope); an
+   * encrypted document is always read whether or not this is set. Off by
+   * default because the envelope binds the document to one Windows account on
+   * one machine, which a portable install moved elsewhere cannot decrypt. See
+   * `src/dpapi.ts` for the tradeoff.
+   */
+  encrypt?: boolean
 }
 ```
 <!-- END GENERATED config-catalog:@deepseek-ai/dsh-credentials-local -->

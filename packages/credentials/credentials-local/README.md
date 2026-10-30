@@ -45,6 +45,7 @@ Use it as the default local store: the product's base composition loads it, and 
 | `dshHome` | `$DSH_HOME` or `~/.dsh` | Harness home used when `path` is omitted |
 | `watch` | `true` | Reload the file automatically when it changes on disk |
 | `debounceMs` | `100` | Wait this long after a change before reloading, in milliseconds |
+| `encrypt` | `false` | Seal every write in a Windows DPAPI envelope (current user); an already-sealed document is always read |
 
 The generated [configuration catalog](../../../docs/config-catalog.md#deepseek-aidsh-credentials-local) is the exhaustive source for every accepted field and its JSDoc.
 
@@ -196,7 +197,7 @@ No direct invalidation; stored values never enter a request prefix.
 These limits define when the provider is a poor fit or needs special operational care. They are current package constraints, not a task backlog.
 
 - **Same-reference concurrent writes are last-write-wins** — the writer lock and the read-modify-write keep concurrent writers from dropping each other's entries, but two writers editing one reference still resolve to the later write; there is no revision check.
-- **A same-UID process can read the document** — the file-effect sandbox modes do not deny reads, and an OS-keychain provider is deferred.
+- **A same-UID process can read the document** — the file-effect sandbox modes do not deny reads, and an OS-keychain provider is deferred. `encrypt: true` closes this half on Windows by sealing the document with DPAPI under the current user, at the cost of binding it to that one account on that one machine: a portable install copied elsewhere, or opened under another account, cannot decrypt it and must re-enter its credentials.
 - **Environment changes are invisible** — the snapshot is frozen at launch, so a variable exported after startup reaches neither resolution nor `describe`; changing an environment-sourced credential takes a restart.
 - **Atomic, not crash-durable** — inherited from `dsh-atomic-write`; the store re-reads on boot.
 
@@ -208,6 +209,6 @@ These limits define when the provider is a poor fit or needs special operational
 
 This Dev Note is working context for maintainers: open questions and undecided directions. It is explicitly non-authoritative — shipped behavior and limits live in the sections above and in the package code.
 
-An OS-keychain provider — a store the model's processes cannot read — is the deferred answer to the same-UID limitation and belongs beside this provider as a sibling package. The seam shape also leaves room for helper-command- and KMS-backed providers; none is shipped.
+An OS-keychain provider — a store the model's processes cannot read — remains the deferred answer to the same-UID limitation and belongs beside this provider as a sibling package; the `encrypt` option answers the same question on Windows only, and with a portability cost that an account-bound keychain would not have. The seam shape also leaves room for helper-command- and KMS-backed providers; none is shipped.
 
 </details>

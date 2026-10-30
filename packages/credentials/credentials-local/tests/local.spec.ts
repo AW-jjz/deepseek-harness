@@ -49,12 +49,17 @@ function updates(ctx: Context): CredentialRef[] {
 describe('resolveSpec', () => {
   it('defaults to .credentials.yaml under the harness home with watching on', () => {
     const spec = resolveSpec({ dshHome: '/custom/home' })
-    expect(spec).toEqual({ filename: resolve('/custom/home/.credentials.yaml'), watch: true, debounceMs: 100 })
+    expect(spec).toEqual({ filename: resolve('/custom/home/.credentials.yaml'), watch: true, debounceMs: 100, encrypt: false })
   })
 
   it('lets an explicit path win over the home', () => {
     const spec = resolveSpec({ path: '/etc/dsh/creds.yaml', dshHome: '/ignored', watch: false, debounceMs: 5 })
-    expect(spec).toEqual({ filename: resolve('/etc/dsh/creds.yaml'), watch: false, debounceMs: 5 })
+    expect(spec).toEqual({ filename: resolve('/etc/dsh/creds.yaml'), watch: false, debounceMs: 5, encrypt: false })
+  })
+
+  it('seals the document only on request, because the envelope binds it to one account', () => {
+    expect(resolveSpec({ dshHome: '/custom/home', encrypt: true }).encrypt).toBe(true)
+    expect(resolveSpec({ dshHome: '/custom/home' }).encrypt).toBe(false)
   })
 })
 
