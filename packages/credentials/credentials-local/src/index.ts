@@ -545,6 +545,7 @@ export class LocalCredentialProvider extends CredentialProvider {
     dshHome: z.string(),
     watch: z.boolean().default(true),
     debounceMs: z.number().min(0).default(100),
+    encrypt: z.boolean().default(false),
   })
 
   private readonly spec: ResolvedSpec

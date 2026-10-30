@@ -53,6 +53,18 @@ describe('decryptDocumentText', () => {
   })
 })
 
+describe('the plugin schema', () => {
+  it('declares encrypt, so a config file can turn it on', () => {
+    const normalized = LocalCredentialProvider.Config({ encrypt: true }) as { encrypt: boolean }
+    expect(normalized.encrypt).toBe(true)
+  })
+
+  it('defaults encrypt to off', () => {
+    const normalized = LocalCredentialProvider.Config({}) as { encrypt: boolean }
+    expect(normalized.encrypt).toBe(false)
+  })
+})
+
 describe.skipIf(process.platform !== 'win32')('DPAPI round trip', () => {
   // Each leg starts Windows PowerShell and loads System.Security: the first
   // call after boot costs seconds, which the 5 s default would call a failure.
