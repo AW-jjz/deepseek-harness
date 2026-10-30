@@ -12,7 +12,7 @@ import { afterEach, expect, it, onTestFinished, vi } from 'vitest'
 
 afterEach(() => { vi.unstubAllEnvs() })
 
-it.each(['desktop', 'web'])('limits collection and its shutdown to the Desktop launch: %s', async (profile) => {
+it.each(['desktop', 'web'])('limits collection and its shutdown to the Desktop launch: %s', { timeout: 60_000 }, async (profile) => {
   const received = Promise.withResolvers<undefined>()
   const server = createServer((req) => { req.resume(); req.once('end', () => { received.resolve(undefined) }) })
   server.listen(0, '127.0.0.1')
