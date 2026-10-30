@@ -114,8 +114,9 @@ minimumReleaseAgeExclude:
   - pnpm@11.28.5
   # The Electron release Desktop ships. Its embedded Node version is what the primary-runtime
   # lock pins; whether the require-builtin addon accepts its fingerprint is reported at startup,
-  # never assumed here.
-  - electron@44.9.3
+  # never assumed here. 44.10.0 carries Node 24.22.1, the security line the packaging gate
+  # asserts (apps/desktop/src/embedded-node-baseline.ts).
+  - electron@44.10.0
 patchedDependencies:
   '@botiverse/oar@0.67.0': patches/@botiverse__oar@0.67.0.patch
   '@earendil-works/pi-ai@1.3.0': patches/@earendil-works__pi-ai@1.3.0.patch

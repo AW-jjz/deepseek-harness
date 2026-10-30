@@ -14,6 +14,7 @@ import { preparePrimaryRuntime } from './prepare-primary-runtime.ts'
 import { prepareDesktopCli } from './prepare-cli.ts'
 import { prepareCommandLink } from './prepare-command-link.ts'
 import { pinnedElectronArchiveSha256, verifyElectronArchive } from './electron-archive.ts'
+import { assertEmbeddedNodeBaselineGate } from '../src/embedded-node-baseline.ts'
 
 const BUILD_PATHS = resolveDesktopTargetBuildPaths()
 const RUNTIME_ROOT = BUILD_PATHS.runtime
@@ -41,9 +42,13 @@ async function prepareElectron({ platform, arch }: DesktopTarget): Promise<strin
   rmSync(BUILD_PATHS.electron, { recursive: true, force: true })
   await packagingStep(process.env.DSH_DESKTOP_PACKAGING_RUN_DIR, 'extract:electron', () => extractZip(archive, { dir: BUILD_PATHS.electron }))
   const executable = join(BUILD_PATHS.electron, platform === 'win32' ? 'electron.exe' : 'Electron.app/Contents/MacOS/Electron')
-  return execFileSync(executable, ['-p', 'process.versions.node'], {
+  const embeddedNodeVersion = execFileSync(executable, ['-p', 'process.versions.node'], {
     encoding: 'utf8', env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
   }).trim()
+  const verdict = assertEmbeddedNodeBaselineGate({ embeddedNodeVersion })
+  process.stdout.write(`desktop runtime: ${verdict.reason}
+`)
+  return embeddedNodeVersion
 }
 
 function prepareCli({ platform, arch }: DesktopTarget): void {
