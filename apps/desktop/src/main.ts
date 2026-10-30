@@ -584,9 +584,32 @@ async function main(): Promise<void> {
         const ready = await host.start()
         hostCookie = await authenticateWebHost(ready.url)
         hostUrl = ready.url
+        // Every launch binds its cookie to a fresh host:port, but Chromium keys
+        // cookies by host alone: stale dsh-auth cookies from earlier launches
+        // pile up until the Cookie header exceeds the Host's header limit (431).
+        // Keep the current authority's cookie, drop the rest, and send only it.
+        const authNameEnd = hostCookie.indexOf('=')
+        const authCookieName = authNameEnd < 0 ? hostCookie : hostCookie.slice(0, authNameEnd)
+        const hostAuthCookie = (name: string): boolean => name.startsWith('dsh-auth-')
+        const jar = await session.defaultSession.cookies.get({ url: ready.url })
+        await Promise.all(jar
+          .filter(cookie => hostAuthCookie(cookie.name) && cookie.name !== authCookieName)
+          .map(async (cookie) => {
+            try {
+              await session.defaultSession.cookies.remove(ready.url, cookie.name)
+            } catch {
+              // A cookie that cannot be removed now still expires on its own.
+            }
+          }))
         if (ready.injections === undefined) throw new Error('Desktop Host did not provide boot injections')
         injections = ready.injections
-        welcomeBackend = await connectDesktopWelcome(ready.url, (input, init) => net.fetch(input, init), async () => (await session.defaultSession.cookies.get({ url: ready.url })).map(cookie => `${cookie.name}=${cookie.value}`).join('; '))
+        welcomeBackend = await connectDesktopWelcome(ready.url, (input, init) => net.fetch(input, init), async () => {
+          const cookies = await session.defaultSession.cookies.get({ url: ready.url })
+          return cookies
+            .filter(cookie => !hostAuthCookie(cookie.name) || cookie.name === authCookieName)
+            .map(cookie => `${cookie.name}=${cookie.value}`)
+            .join('; ')
+        })
         analyticsEnabled = await welcomeBackend.analyticsEnabled().catch(() => false)
         if (!reportedLaunch) { reportedLaunch = true; void track('desktop_app_launch', {}) }
         stopAccount?.()
