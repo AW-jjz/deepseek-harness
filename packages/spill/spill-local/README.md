@@ -29,7 +29,7 @@ Mount this backend in a composition that spills text to the local filesystem. It
 
 ### Minimal configuration
 
-Loading the plugin with no config is safe: files land in a lazily-created private (0700) per-process directory under the OS temp directory. Set `root` when the files must live under a known location.
+Loading the plugin with no config is safe: files land in a lazily-created private (0700) per-process directory under the OS temp directory. Set `root` when the files must live under a known location. The shipped bundles do exactly that: their `spill-local` row passes `dshHomePath('spill')`, so a product deployment keeps spill files in `$DSH_HOME/spill` (by default `~/.dsh/spill`) instead of a temp directory a cleaner can empty.
 
 ```yaml
 - name: '@deepseek-ai/dsh-spill-local'

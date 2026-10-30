@@ -407,6 +407,11 @@
 
     - id: spill-local
       name: '@deepseek-ai/dsh-spill-local'
+      config:
+        # A saved tool result references its spill file by absolute path, so the
+        # root has to survive a restart and a temp-directory cleaner: the same
+        # home-anchored resolver the sessions and storages rows use.
+        root: !!js dshHomePath('spill')
 
     - id: spill-policy
       name: '@deepseek-ai/dsh-spill-policy'

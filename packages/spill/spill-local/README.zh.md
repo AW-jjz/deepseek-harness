@@ -29,7 +29,7 @@ kind: "package-reference"
 
 ### 最小配置
 
-不带配置加载插件是安全的：文件会落在操作系统临时目录下延迟创建的私有（0700）每进程目录中。当文件必须位于已知位置时，设置 `root`。
+不带配置加载插件是安全的：文件会落在操作系统临时目录下延迟创建的私有（0700）每进程目录中。当文件必须位于已知位置时，设置 `root`。出厂 bundle 就是这么做的：它们的 `spill-local` 行传入 `dshHomePath('spill')`，因此产品部署把 spill 文件放在 `$DSH_HOME/spill`（默认 `~/.dsh/spill`），而不是会被清理器清空的临时目录。
 
 ```yaml
 - name: '@deepseek-ai/dsh-spill-local'
