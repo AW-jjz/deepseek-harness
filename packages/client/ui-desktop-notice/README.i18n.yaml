@@ -8,21 +8,27 @@
 /deepseek-ai-dsh-client-ui-desktop-notice:
   en: 25102999ccc99cbc
   zh: 6a568256fa7f399c
-/deepseek-ai-dsh-client-ui-desktop-notice/overview:
-  en: 102cfa398fd12cf2
+/deepseek-ai-dsh-client-ui-desktop-notice/summary:
+  en: 7d1c0584afe6410b
   zh: 8b88dcdc0f0151fa
+/deepseek-ai-dsh-client-ui-desktop-notice/table-of-contents:
+  en: a202e1172a94b90b
+  zh: 4b3aa8812422d55e
 /deepseek-ai-dsh-client-ui-desktop-notice/what-it-watches:
-  en: fc3a95aa795bda57
-  zh: f384aad23a8ce091
+  en: 160611235583275b
+  zh: 23dfcda5d9fa8953
 /deepseek-ai-dsh-client-ui-desktop-notice/failure-behavior:
-  en: 6db550ba2e90141f
-  zh: f4f426a19ccb8b13
+  en: bebef3e7e6e358a6
+  zh: 4e89758704a0ab1b
 /deepseek-ai-dsh-client-ui-desktop-notice/model-experience:
   en: 3120df665299c634
   zh: 6f2d4d04cd7a9445
 /deepseek-ai-dsh-client-ui-desktop-notice/model-experience/kv-cache-effect:
-  en: ca75c51c89c2c9b0
-  zh: 64715dc7e6d02f71
+  en: 62a2d806b05ac679
+  zh: 43c7488da756dbb6
 /deepseek-ai-dsh-client-ui-desktop-notice/known-limitations-and-deferred-work:
-  en: e0a29d1456c9a71e
-  zh: 88d090d8955f24bd
+  en: 27822d86931fd2cc
+  zh: bbac8870f2574797
+/deepseek-ai-dsh-client-ui-desktop-notice/known-limitations-and-deferred-work/dev-note:
+  en: 75c1f4eac74596cb
+  zh: ab83b3a8bbaf1807
