@@ -3,7 +3,7 @@ import * as NativeToolExecutor from '@deepseek-ai/dsh-tool-executor-native'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import { afterEach, describe, expect, it } from 'vitest'
 import { unsupportedModel, provideWorkingDirectoryFixture, unsupportedInbox } from '@deepseek-ai/dsh-agent-loop-testkit'
-import { mkdir, rm, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { Context } from '@deepseek-ai/cordis'
@@ -64,7 +64,15 @@ async function setup(home: string, config: toolSkill.Config = {}): Promise<Conte
   await ctx.plugin(NativeToolExecutor)
   await ctx.plugin(AgentRegistry)
   await ctx.plugin(SkillRegistry)
-  await ctx.plugin(SkillFileSystem, { dshHome: join(home, '.dsh'), agentsHome: join(home, '.agents'), watch: false })
+  await ctx.plugin(SkillFileSystem, {
+    dshHome: join(home, '.dsh'),
+    agentsHome: join(home, '.agents'),
+    watch: false,
+    // This spec owns tool-facing catalog and load behavior with skills already
+    // available; the project approval gate has its own spec in
+    // skill-filesystem and one end-to-end case below.
+    requireProjectSkillApproval: false,
+  })
   await ctx.plugin(toolSkill, config)
   return ctx
 }
@@ -796,6 +804,52 @@ describe('dsh-tool-skill', () => {
     expect(await composePrefixForAgent(ctx, agent)).toEqual([])
     expect(await composePrefix(ctx, '/workspace')).toHaveLength(1)
     await scope.dispose()
+  })
+
+  it('withholds a project skill from the catalog and the tool until its content is approved', async () => {
+    const home = await tempDir('tool-approval-gate')
+    const project = await tempDir('tool-approval-gate-project')
+    await mkdir(join(project, '.git'), { recursive: true })
+    await writeSkill(join(project, '.dsh/skills'), 'gated-skill', 'Gated description', 'Gated instructions.')
+    const ctx = new Context()
+    provideWorkingDirectoryFixture(ctx, home)
+    await ctx.plugin(SystemPrompt)
+    await ctx.plugin(ToolRuntime)
+    await ctx.plugin(SessionProjectionRegistry)
+    await ctx.plugin(NativeToolExecutor)
+    await ctx.plugin(AgentRegistry)
+    await ctx.plugin(SkillRegistry)
+    await ctx.plugin(SkillFileSystem, {
+      dshHome: join(home, '.dsh'),
+      agentsHome: join(home, '.agents'),
+      watch: false,
+      requireProjectSkillApproval: true,
+    })
+    await ctx.plugin(toolSkill)
+    const session = Session.create(SessionId('approval-gate'), [], {
+      version: SESSION_FORMAT_VERSION, id: SessionId('approval-gate'), createdAt: 0, cwd: project, isSeeded: false,
+    })
+    const agent = sessionAgent(session)
+    openMessageTurn(session)
+
+    expect(JSON.stringify(await composePrefixForAgent(ctx, agent))).not.toContain('Gated description')
+    const withheld = await executeToolFixture(ctx, {
+      signal: testToolSignal,
+      callId: ToolCallId('gate-1'),
+      name: 'skill',
+      arguments: { name: 'gated-skill' },
+      agent,
+    })
+    expect(withheld.isError).toBe(true)
+
+    await ctx.skillApprovals.approve(
+      project,
+      'gated-skill',
+      SkillFileSystem.skillDigest(await readFile(join(project, '.dsh/skills/gated-skill/SKILL.md'), 'utf8')),
+    )
+
+    await fireStep(ctx, agent, 1, 1)
+    expect(JSON.stringify(catalogMessages(session).at(-1)?.data.content)).toContain('Gated description')
   })
 
   it('validates the catalog description cap', async () => {

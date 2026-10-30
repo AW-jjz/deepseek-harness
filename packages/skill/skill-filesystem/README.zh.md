@@ -55,6 +55,8 @@ skill 可以是被扫描根目录顶层的目录 bundle `<name>/SKILL.md`，也�
 
 项目根目录是包含 `.git` 的最近祖先目录；如果不存在，则使用当前 cwd。用户 DSH 根目录会跳过其 `.system` 子目录。`includeDefaultRoots: false` 会省略项目根、用户根以及 `$DSH_BUNDLED_SKILL_DIR` 默认值，使隔离提供方只看到自身配置的根；`bundledSkillDir` 会按 rank 600 添加一个随包提供的根目录。
 
+项目根是唯一一类本提供方可以要求批准的根。检出目录由写下它的人编写，因此可以要求发现阶段不要把它的指令交给模型：开启 `requireProjectSkillApproval: true` 后，发现到的项目 skill 仍会列给用户，但在有人批准那一份确切文件之前一律带 `modelInvocable: false`——模型目录与加载器都不会返回它。批准以「项目根 + skill 名」为键，并绑定到解码后指令文件的 SHA-256，因此编辑已批准的 skill（或拉取修改了它的提交）会作废该决定，让 skill 回到待批准状态，而不是沿用上一次批准的信任。决定存放在 `<dshHome>/skill-approvals.json`，可通过 `ctx.skillApprovals` 服务读写（`SkillApprovalStore`）。本层默认值为 `false`：记录决定的人机命令作为独立插件发布，组合在挂载它之后才开启该要求。
+
 ### 挂载与配置
 
 与 skill 注册表一起加载该插件；它需要 `ctx.skills`。
@@ -73,6 +75,7 @@ skill 可以是被扫描根目录顶层的目录 bundle `<name>/SKILL.md`，也�
 | `customSkillDirs` | `[]` | 其他本地 skill 根目录，位于项目根之后、用户根之前 |
 | `watch` | `true` | 监视本地根，并在目录可能变化时使提供方失效 |
 | `bundledSkillDir` | — | 配置后按 rank 600 扫描的随包提供的 skill 根目录 |
+| `requireProjectSkillApproval` | `false` | 项目内的 skill 进入模型之前是否需要一条已记录的批准 |
 
 其余 `watch*` 字段用于调节 Chokidar 行为——轮询、稳定窗口、间隔、项目上限与符号链接跟随。生成的[配置目录](../../../docs/config-catalog.zh.md#deepseek-aidsh-skill-filesystem)完整列出了所有字段，是这些字段的真源。
 
@@ -148,6 +151,7 @@ watcher 触发的失效可促使上述消费方在现有请求历史中追加替
 - **项目范围为最近 `.git` 祖先**——没有该标记的工作区回退到提供的 cwd，不支持其他项目根标记或 monorepo 子项目选择。
 - **格式错误的条目随警告消失**——模型目录不会收到逐 skill 诊断，无法区分缺失的 skill 与无效的 skill；意外的 I/O 失败则会保留最后一份可用目录。
 - **缺失根观察每次轮询一个路径段**——启动时不存在的根会使用 `fs.watchFile` 按 `watchPollIntervalMs` 轮询，直至 Chokidar 可以附加；这以有界检测延迟换取跨 IDE、Git 与 shell 工作流的可靠创建检测。
+- **待批准的项目 skill 不出现在任何模型面**——开启该要求后，它保留面向用户的目录条目与 `/name` 调用，但在其确切内容被批准之前，任何模型目录或加载器都不会返回它；一旦编辑该文件，批准即作废。因此正在编写中的项目 skill 每改一次就需要重新批准一次。
 - **无正文修订协议**——已加载正文是普通的已保留工具历史；后续文件编辑会影响后续调用，但既不会改写旧结果，也不会通知正文已变化。
 
 <a id="dev-note"></a>

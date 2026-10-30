@@ -31,6 +31,9 @@ import {
   type SkillProviderObservation,
   type SkillSource,
 } from '@deepseek-ai/dsh-skill'
+import { SkillApprovalStore, skillDigest, type SkillApprovalGate } from './approvals.ts'
+
+export { SkillApprovalStore, skillDigest, type SkillApprovalEntry, type SkillApprovalGate } from './approvals.ts'
 
 const PROJECT_DSH_RANK = 100
 const PROJECT_AGENTS_RANK = 200
@@ -43,6 +46,13 @@ const DEFAULT_WATCH_MAX_PROJECTS = 128
 
 export const name = 'skill-filesystem'
 export const inject = ['skills']
+
+declare module '@deepseek-ai/cordis' {
+  interface Context {
+    /** Shared record of which project-local skills a human enabled for models. */
+    skillApprovals: SkillApprovalStore
+  }
+}
 
 /** Local filesystem skill provider configuration. */
 export interface Config {
@@ -70,6 +80,13 @@ export interface Config {
   watchFollowSymlinks?: boolean
   /** Bundled skill root; defaults to `$DSH_BUNDLED_SKILL_DIR` when default roots are included, otherwise mounts none. */
   bundledSkillDir?: string
+  /**
+   * Whether a project-local skill root needs a recorded human approval before
+   * its skills reach a model. Defaults to `true`: a checked-out repository is
+   * authored by whoever wrote it, so discovery alone must not hand its
+   * instructions to a model.
+   */
+  requireProjectSkillApproval?: boolean
 }
 
 export const Config: Schema<Config> = z.object({
@@ -85,6 +102,7 @@ export const Config: Schema<Config> = z.object({
   watchMaxProjects: z.number().default(DEFAULT_WATCH_MAX_PROJECTS),
   watchFollowSymlinks: z.boolean().default(true),
   bundledSkillDir: z.string(),
+  requireProjectSkillApproval: z.boolean().default(false),
 })
 
 interface SkillRoot {
@@ -113,11 +131,15 @@ interface ParsedSkill extends SkillText {
   whenToUse?: string
   invocation: SkillInvocationPolicy
   metadata?: Record<string, unknown>
+  /** SHA-256 of the decoded instruction file, pinned by a project approval. */
+  digest: string
 }
 
 interface LocalLocator {
   path: string
   directory: string
+  /** Project root that owns the skill root; absent for non-project roots. */
+  projectRoot?: string
 }
 
 interface ResolvedWatchConfig {
@@ -131,9 +153,22 @@ interface ResolvedWatchConfig {
 
 /** Register the local filesystem skill provider on `ctx.skills`. */
 export function apply(ctx: Context, config: Config = {}): void {
+  const invalidators = new Set<() => void>()
+  const approvals = new SkillApprovalStore({
+    dshHome: resolveDshHome(config.dshHome),
+    enabled: config.requireProjectSkillApproval ?? false,
+    logger: (message) => { ctx.logger.warn(`skill-filesystem: ${message}`) },
+    // One decision invalidates every composed registry: the write may have
+    // landed through this handle while other layers hold their own catalogs.
+    onChange: () => {
+      for (const invalidate of invalidators) invalidate()
+    },
+  })
+  ctx.provide('skillApprovals', approvals)
   let provider!: FileSystemSkillProvider
   ctx.skills.registerProvider((control) => {
-    provider = new FileSystemSkillProvider(ctx, control, config)
+    invalidators.add(control.invalidate)
+    provider = new FileSystemSkillProvider(ctx, control, config, approvals)
     return provider
   })
   ctx.effect(function* () {
@@ -154,17 +189,24 @@ export class FileSystemSkillProvider implements SkillProvider {
   private readonly customSkillDirs: string[]
   private readonly watchManager: SkillWatchManager
   private readonly bundledSkillDir: string | undefined
+  private readonly approvals: SkillApprovalGate
   private disposal: Promise<void> | undefined
 
   constructor(
     private readonly ctx: Context,
     control: SkillProviderControl,
     config: Config = {},
+    approvals?: SkillApprovalGate,
   ) {
     this.name = config.providerName ?? 'filesystem'
     this.includeDefaultRoots = config.includeDefaultRoots ?? true
     this.dshHome = resolveDshHome(config.dshHome)
     this.agentsHome = resolveAgentsHome(config.agentsHome)
+    this.approvals = approvals ?? new SkillApprovalStore({
+      dshHome: this.dshHome,
+      enabled: config.requireProjectSkillApproval ?? false,
+      logger: (message) => { this.ctx.logger.warn(`skill-filesystem: ${message}`) },
+    })
     this.customSkillDirs = (config.customSkillDirs ?? []).map(root => resolve(root))
     this.watchManager = new SkillWatchManager(ctx, control.invalidate, resolveWatchConfig(config))
     control.signal.addEventListener('abort', () => { void this.dispose() }, { once: true })
@@ -193,7 +235,7 @@ export class FileSystemSkillProvider implements SkillProvider {
     }
     const candidates: SkillCandidate[] = []
     for (const root of roots) {
-      for (const skill of await discoverRoot(root, this.ctx, this.name)) {
+      for (const skill of await discoverRoot(root, this.ctx, this.name, this.approvals)) {
         candidates.push(skill)
       }
     }
@@ -214,7 +256,10 @@ export class FileSystemSkillProvider implements SkillProvider {
       name: parsed.name,
       description: parsed.description,
       ...parsed.whenToUse !== undefined ? { whenToUse: parsed.whenToUse } : {},
-      invocation: parsed.invocation,
+      invocation: await gatedInvocation(parsed, {
+        scoped: isProjectSource(candidate.source),
+        root: locator.projectRoot,
+      }, this.approvals),
       source: candidate.source,
       provider: this.name,
       resourceBase: { kind: 'directory', path: locator.directory },
@@ -727,15 +772,20 @@ function hasErrorCode(error: unknown, code: string): boolean {
   return typeof error === 'object' && error !== null && 'code' in error && error.code === code
 }
 
-async function discoverRoot(root: SkillRoot, ctx: Context, provider: string): Promise<SkillCandidate[]> {
+async function discoverRoot(
+  root: SkillRoot,
+  ctx: Context,
+  provider: string,
+  approvals: SkillApprovalGate,
+): Promise<SkillCandidate[]> {
   const skills: SkillCandidate[] = []
   const entries = await listSkillRootEntries(root, ctx)
   for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
     if (root.skipSystem && entry.name === '.system') continue
     const locator = entry.type === 'directory'
-      ? { path: join(entry.path, 'SKILL.md'), directory: entry.path }
+      ? { path: join(entry.path, 'SKILL.md'), directory: entry.path, ...projectTag(root) }
       : entry.type === 'file' && entry.name.endsWith('.md')
-        ? { path: entry.path, directory: root.path }
+        ? { path: entry.path, directory: root.path, ...projectTag(root) }
         : undefined
     if (locator === undefined) continue
     const parsed = await parseSkillFile(locator.path, ctx, undefined, root.trustedHost === true)
@@ -744,7 +794,10 @@ async function discoverRoot(root: SkillRoot, ctx: Context, provider: string): Pr
       name: parsed.name,
       description: parsed.description,
       ...parsed.whenToUse !== undefined ? { whenToUse: parsed.whenToUse } : {},
-      invocation: parsed.invocation,
+      invocation: await gatedInvocation(parsed, {
+        scoped: root.projectRoot !== undefined,
+        root: root.projectRoot,
+      }, approvals),
       provider,
       source: root.source,
       rank: root.rank,
@@ -755,6 +808,40 @@ async function discoverRoot(root: SkillRoot, ctx: Context, provider: string): Pr
     })
   }
   return skills
+}
+
+/** Project tag carried by a locator so `get()` can re-check the same approval. */
+function projectTag(root: SkillRoot): { projectRoot?: string } {
+  return root.projectRoot === undefined ? {} : { projectRoot: root.projectRoot }
+}
+
+/** Whether a source names a root authored by the checkout rather than the user. */
+function isProjectSource(source: SkillSource): boolean {
+  return source === 'project-dsh' || source === 'project-agents'
+}
+
+/**
+ * Apply the project approval gate to one parsed skill.
+ *
+ * Only `modelInvocable` is demoted: the user-facing catalog and the explicit
+ * `/name` invocation stay available, so a pending skill is listed but never
+ * silently advertised to a model. A project-scoped skill with no recorded root
+ * cannot be matched to an approval and stays demoted instead of inheriting
+ * discovery trust.
+ * @param parsed - freshly parsed skill carrying the content digest.
+ * @param project - whether the skill came from a project root, and which one.
+ * @param approvals - the configured approval gate.
+ * @returns the invocation policy the candidate or definition must publish.
+ */
+async function gatedInvocation(
+  parsed: ParsedSkill,
+  project: { readonly scoped: boolean; readonly root: string | undefined },
+  approvals: SkillApprovalGate,
+): Promise<SkillInvocationPolicy> {
+  if (!approvals.enabled || !project.scoped || !parsed.invocation.modelInvocable) return parsed.invocation
+  const approved = project.root !== undefined
+    && await approvals.isApproved(project.root, parsed.name, parsed.digest)
+  return approved ? parsed.invocation : { ...parsed.invocation, modelInvocable: false }
 }
 
 async function listSkillRootEntries(root: SkillRoot, ctx: Context): Promise<SkillRootEntry[]> {
@@ -843,6 +930,7 @@ async function parseSkillFile(path: string, ctx: Context, signal?: AbortSignal, 
     ...optionalMetadata(parsed.data),
     path: raw.path,
     content: parsed.body.trim(),
+    digest: skillDigest(raw.content),
   }
 }
 

@@ -55,6 +55,8 @@ Default roots are scanned in this provider's rank order:
 
 The project root is the nearest ancestor containing `.git`; without one, the current cwd is used. The user DSH root skips its `.system` child. `includeDefaultRoots: false` omits the project and user rows plus the `$DSH_BUNDLED_SKILL_DIR` default so an isolated provider sees only its own configured roots; `bundledSkillDir` adds a bundled root at rank 600.
 
+Project roots are the one kind of root this provider can require approval for. A checkout is authored by whoever wrote it, so discovery can be told not to hand its instructions to a model: with `requireProjectSkillApproval: true` a discovered project skill is still listed for the user but carries `modelInvocable: false` — no model catalog and no loader returns it — until a human approves that exact file. Approval is keyed by project root and skill name and pinned to the SHA-256 of the decoded instruction file, so editing an approved skill, or pulling a commit that edits it, voids the decision and returns the skill to the pending state instead of inheriting trust from the earlier one. Decisions live in `<dshHome>/skill-approvals.json` and are readable and writable through the `ctx.skillApprovals` service (`SkillApprovalStore`). The requirement defaults to `false` at this layer: the human-facing command that records a decision ships as its own plugin, and a composition switches this on when it mounts one.
+
 ### Mount and configure
 
 Load the plugin alongside the skill registry; it requires `ctx.skills`.
@@ -73,6 +75,7 @@ Load the plugin alongside the skill registry; it requires `ctx.skills`.
 | `customSkillDirs` | `[]` | Additional local skill roots, after project roots and before user roots |
 | `watch` | `true` | Watch local roots and invalidate the provider when the catalog may have changed |
 | `bundledSkillDir` | — | Bundled skill root scanned at rank 600 when configured |
+| `requireProjectSkillApproval` | `false` | Require a recorded approval before a project-local skill reaches a model |
 
 The remaining `watch*` fields tune Chokidar behavior — polling, stability window, interval, project cap, and symlink following. The generated [configuration catalog](../../../docs/config-catalog.md#deepseek-aidsh-skill-filesystem) is the exhaustive source for every field.
 
@@ -148,6 +151,7 @@ These limits define when the provider is a poor fit or needs special operational
 - **Project scope is the nearest `.git` ancestor** — workspaces without that marker fall back to the supplied cwd, with no alternate project-root marker or monorepo subproject selection.
 - **Malformed entries disappear with a warning** — the model catalog receives no per-skill diagnostic and cannot distinguish an absent skill from an invalid one; unexpected I/O failures preserve the last-good catalog instead.
 - **Missing-root observation polls one path segment** — roots absent at startup use `fs.watchFile` at `watchPollIntervalMs` until Chokidar can attach, trading bounded detection latency for reliable creation detection across IDE, Git, and shell workflows.
+- **A pending project skill stays out of every model surface** — with the requirement enabled it keeps its user-facing catalog row and `/name` invocation, but no model catalog or loader returns it until its exact content is approved, and editing the file voids that approval. A project skill under active authoring therefore needs one approval per edit.
 - **No body revision protocol** — a loaded body is ordinary retained tool history; later file edits affect later calls but neither rewrite old results nor announce that the body changed.
 
 <a id="dev-note"></a>
