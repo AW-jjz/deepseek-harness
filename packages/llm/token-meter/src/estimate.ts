@@ -9,8 +9,37 @@
 import type { ContentBlock, Message } from '@deepseek-ai/dsh-llm'
 import type { EpochHeader } from '@deepseek-ai/dsh-session'
 
-/** Fixed text-density estimate used until exact tokenization is needed. */
-const CHARS_PER_TOKEN = 4
+/**
+ * Fixed text-density estimate used until exact tokenization is needed. ASCII
+ * text packs about four characters into a token; every other code point is
+ * priced at one token, because CJK and other wide scripts spend far more of
+ * their UTF-8 bytes on characters than on tokens, so a Latin density would
+ * underprice them by up to four times. Overpricing is the safe direction: it
+ * compacts early instead of letting a provider reject an oversized request.
+ */
+const ASCII_CHARS_PER_TOKEN = 4
+
+/** Conservative per-code-point price for text outside ASCII. */
+const NON_ASCII_CHARS_PER_TOKEN = 1
+
+/**
+ * Price text from its script mix rather than its raw length. ASCII runs keep
+ * the four-characters-per-token density, so pure-Latin content prices exactly
+ * as it always has; each non-ASCII code point costs a whole token.
+ * @param text - text to price without mutation.
+ * @returns heuristic tokens for the text alone, with no framing overhead.
+ */
+export function estimateTextTokens(text: string): number {
+  let ascii = 0
+  let wide = 0
+  for (const character of text) {
+    // A code point's first UTF-16 unit is below 0x80 exactly when the whole
+    // character is ASCII, so this keeps surrogate pairs out of the ASCII run.
+    if (character.charCodeAt(0) < 0x80) ascii += 1
+    else wide += 1
+  }
+  return Math.ceil(ascii / ASCII_CHARS_PER_TOKEN) + wide * NON_ASCII_CHARS_PER_TOKEN
+}
 
 /** Per-block structural overhead for JSON framing and type tags. */
 const BLOCK_OVERHEAD = 4
@@ -29,9 +58,9 @@ export const ROLE_OVERHEAD = 4
 export function estimateStructuralBlock(block: ContentBlock): number {
   if (block.type === 'image') {
     const { offloaded: _offloaded, ...reference } = block
-    return BLOCK_OVERHEAD + Math.ceil(JSON.stringify(reference).length / CHARS_PER_TOKEN)
+    return BLOCK_OVERHEAD + estimateTextTokens(JSON.stringify(reference))
   }
-  return BLOCK_OVERHEAD + Math.ceil(JSON.stringify(block).length / CHARS_PER_TOKEN)
+  return BLOCK_OVERHEAD + estimateTextTokens(JSON.stringify(block))
 }
 
 /**
@@ -45,11 +74,11 @@ export function estimateContent(blocks: readonly ContentBlock[]): number {
     switch (block.type) {
       case 'text':
       case 'reasoning':
-        tokens += Math.ceil(block.text.length / CHARS_PER_TOKEN) + BLOCK_OVERHEAD
+        tokens += estimateTextTokens(block.text) + BLOCK_OVERHEAD
         break
       case 'tool-call':
-        tokens += Math.ceil(block.name.length / CHARS_PER_TOKEN)
-          + Math.ceil(block.arguments.length / CHARS_PER_TOKEN)
+        tokens += estimateTextTokens(block.name)
+          + estimateTextTokens(block.arguments)
           + BLOCK_OVERHEAD
         break
       default:
@@ -72,11 +101,13 @@ export function estimateContent(blocks: readonly ContentBlock[]): number {
  */
 export function estimateSystemMessage(message: Message): number {
   if (message.content.length === 0) return 0
-  let characters = 0
+  let tokens = 0
   for (const block of message.content) {
-    characters += block.type === 'text' ? block.text.length : JSON.stringify(block).length
+    tokens += block.type === 'text'
+      ? estimateTextTokens(block.text)
+      : estimateTextTokens(JSON.stringify(block))
   }
-  return Math.ceil(characters / CHARS_PER_TOKEN) + ROLE_OVERHEAD
+  return tokens + ROLE_OVERHEAD
 }
 
 /**
@@ -98,5 +129,5 @@ export function estimateMessage(message: Message): number {
  */
 export function estimateToolsTokens(header: EpochHeader | undefined): number {
   if (header?.tools === undefined || header.tools.length === 0) return 0
-  return Math.ceil(JSON.stringify(header.tools).length / CHARS_PER_TOKEN) + BLOCK_OVERHEAD
+  return estimateTextTokens(JSON.stringify(header.tools)) + BLOCK_OVERHEAD
 }

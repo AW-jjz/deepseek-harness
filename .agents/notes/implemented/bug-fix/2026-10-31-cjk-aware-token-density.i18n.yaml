@@ -1,0 +1,19 @@
+# Bilingual-pair consistency record for 2026-10-31-cjk-aware-token-density.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/implemented/bug-fix/2026-10-31-cjk-aware-token-density.md
+/agent-note-token-pricing-reads-the-script-mix-not-just-the-length:
+  en: b0241a3b2820cc29
+  zh: a82ff5c91f4df54f
+/agent-note-token-pricing-reads-the-script-mix-not-just-the-length/problem:
+  en: f5afe657048c34f5
+  zh: 975140f3eb9ff5f8
+/agent-note-token-pricing-reads-the-script-mix-not-just-the-length/decision:
+  en: eaabe4620c9ee7ed
+  zh: d283a7da4227d45a
+/agent-note-token-pricing-reads-the-script-mix-not-just-the-length/alternatives-considered:
+  en: 5f4242d946182499
+  zh: deaab90486ced0b6
+/agent-note-token-pricing-reads-the-script-mix-not-just-the-length/consequences:
+  en: 1ac6203993e2c812
+  zh: 0f7ffcf7ea0123b7
