@@ -13,7 +13,7 @@ import { executeToolFixture } from '@deepseek-ai/dsh-tool-testkit'
 
 import * as NativeToolExecutor from '@deepseek-ai/dsh-tool-executor-native'
 import { provideWorkingDirectoryFixture } from '@deepseek-ai/dsh-agent-loop-testkit'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import { createScope, type Scope } from '@deepseek-ai/dsh-scope'
 import { join, sep } from 'node:path'
@@ -39,6 +39,7 @@ import {
   presentGrepResult,
   previewLine,
   resolveRgPath,
+  searchTargetPath,
   runRipgrep,
   sampleAcrossTopLevel,
   toWorkdirRelative,
@@ -1219,6 +1220,28 @@ describe('helpers', () => {
     expect(toWorkdirRelative('rel/b.ts', '/w')).toBe('rel/b.ts')
     // Normalization makes this land OUTSIDE the workdir → original path kept.
     expect(toWorkdirRelative('/w/../up.ts', '/w')).toBe('/w/../up.ts')
+  })
+
+  it('searchTargetPath resolves a locator through the filesystem and passes real paths through', async () => {
+    const resolve = vi.fn(async (path: string) => ({ targetKey: `key:${path}`, displayPath: path }))
+    const fs = { resolve, processPath: (target: { targetKey: string }) => `process:${target.targetKey}` }
+    const ctx = { get: (name: string) => name === 'fs' ? fs : undefined } as unknown as Context
+
+    expect(await searchTargetPath(ctx, undefined)).toBeUndefined()
+    expect(await searchTargetPath(ctx, '/plain/dir')).toBe('/plain/dir')
+    expect(await searchTargetPath(ctx, 'relative/dir')).toBe('relative/dir')
+    // A single-letter scheme is a Windows drive prefix, not a locator.
+    expect(await searchTargetPath(ctx, 'C:/plain')).toBe('C:/plain')
+    expect(resolve).not.toHaveBeenCalled()
+
+    expect(await searchTargetPath(ctx, 'spill:/session-ab/x.txt')).toBe('process:key:spill:/session-ab/x.txt')
+    expect(resolve).toHaveBeenCalledWith('spill:/session-ab/x.txt')
+  })
+
+  it('searchTargetPath names the missing backend instead of handing ripgrep a locator', async () => {
+    const ctx = { get: () => undefined } as unknown as Context
+    await expect(searchTargetPath(ctx, 'spill:/session-ab/x.txt'))
+      .rejects.toThrow('a locator needs a filesystem backend')
   })
 
   it('previewLine keeps a within-budget line untouched', () => {

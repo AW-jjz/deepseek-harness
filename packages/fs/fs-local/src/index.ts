@@ -41,6 +41,11 @@ import {
   writeFileAtomic,
 } from './fsio.ts'
 import type { FsIoInternals } from './fsio.ts'
+import { expandLocatorPath, parseLocatorRoots } from './locator.ts'
+import type { LocatorRoot } from './locator.ts'
+
+export { expandLocatorPath, parseLocatorRoots } from './locator.ts'
+export type { LocatorRoot } from './locator.ts'
 
 /** Configuration for the local filesystem backend. */
 export interface Config {
@@ -51,9 +56,19 @@ export interface Config {
    * runtime's safe allocation/decode maximum. Defaults to 10 MiB.
    */
   diffBasisMaxBytes?: number
+  /**
+   * Model-facing locator schemes this backend opens, each a `scheme` and the
+   * absolute `root` directory it names. A request written `<scheme>:/<relative>`
+   * then resolves under that directory instead of at the filesystem root, so a
+   * locator stored in a session log keeps working after the directory moves —
+   * set it together with the producing backend's own scheme option (for spill,
+   * `locatorScheme`), and both recompute from the same configuration. Unset
+   * registers none, and every path keeps its previous meaning.
+   */
+  locatorRoots?: LocatorRoot[]
 }
 
-type ResolvedConfig = Required<Config>
+type ResolvedConfig = Required<Omit<Config, 'locatorRoots'>> & Pick<Config, 'locatorRoots'>
 const DEFAULT_DIFF_BASIS_MAX_BYTES = 10 * 1024 * 1024
 const MAX_DIFF_BASIS_BYTES = Math.min(
   bufferConstants.MAX_LENGTH,
@@ -93,10 +108,13 @@ export class LocalFileSystem extends FileSystem {
   static Config: z<Config> = z.object({
     cwd: z.string().default(process.cwd()),
     diffBasisMaxBytes: z.number().default(DEFAULT_DIFF_BASIS_MAX_BYTES),
+    locatorRoots: z.array(z.object({ scheme: z.string(), root: z.string() })),
   })
 
   /** Validated config (schemastery applied the defaults before construction). */
   readonly config: ResolvedConfig
+  /** Registered locator schemes, validated once so resolution is a prefix test. */
+  readonly locatorRoots: readonly LocatorRoot[]
   /** Test hook forwarded to fsio for atomic-publication boundaries. */
   internals: FsIoInternals = {}
   /** Per-targetKey tail promise: serializes mutating ops so the read→guard→write
@@ -113,6 +131,7 @@ export class LocalFileSystem extends FileSystem {
       throw new Error(`fs-local: diffBasisMaxBytes must be a positive safe integer no greater than ${MAX_DIFF_BASIS_BYTES}`)
     }
     this.config = resolved
+    this.locatorRoots = parseLocatorRoots(resolved.locatorRoots)
   }
 
   /** Run `op` with exclusive access to `targetKey` (FIFO per key). */
@@ -133,7 +152,10 @@ export class LocalFileSystem extends FileSystem {
 
   override async resolve(path: string, opts?: { cwd?: string; signal?: AbortSignal }): Promise<FsTarget> {
     if (opts?.signal?.aborted) throw new FsError('resolve aborted', 'FS_ABORTED')
-    const local = await resolveLocalTarget(opts?.cwd ?? this.config.cwd, expandHomePrefix(path))
+    const local = await resolveLocalTarget(
+      opts?.cwd ?? this.config.cwd,
+      expandHomePrefix(expandLocatorPath(path, this.locatorRoots)),
+    )
     if (opts?.signal?.aborted) throw new FsError('resolve aborted', 'FS_ABORTED')
     return { targetKey: local.targetKey, displayPath: local.displayPath }
   }
@@ -167,7 +189,7 @@ export class LocalFileSystem extends FileSystem {
     if (signal?.aborted) throw new FsError('lstat aborted', 'FS_ABORTED')
     if (path.trim().length === 0) throw new FsError('file_path must be a non-empty string', 'FS_NOT_FOUND')
     const cwd = opts?.cwd ?? this.config.cwd
-    const info = await probeNoFollow(localDisplayPath(cwd, expandHomePrefix(path)))
+    const info = await probeNoFollow(localDisplayPath(cwd, expandHomePrefix(expandLocatorPath(path, this.locatorRoots))))
     if (signal?.aborted) throw new FsError('lstat aborted', 'FS_ABORTED')
     if (!info) return undefined
     return { version: info.version, type: info.type, size: info.size }

@@ -1455,7 +1455,7 @@ export interface Config {
 
 ## `@deepseek-ai/dsh-fs-local`
 
-- `source`: [`packages/fs/fs-local/src/index.ts:46`](../packages/fs/fs-local/src/index.ts)
+- `source`: [`packages/fs/fs-local/src/index.ts:51`](../packages/fs/fs-local/src/index.ts)
 
 ```ts config-catalog
 /** Configuration for the local filesystem backend. */
@@ -1467,6 +1467,28 @@ export interface Config {
    * runtime's safe allocation/decode maximum. Defaults to 10 MiB.
    */
   diffBasisMaxBytes?: number
+  /**
+   * Model-facing locator schemes this backend opens, each a `scheme` and the
+   * absolute `root` directory it names. A request written `<scheme>:/<relative>`
+   * then resolves under that directory instead of at the filesystem root, so a
+   * locator stored in a session log keeps working after the directory moves —
+   * set it together with the producing backend's own scheme option (for spill,
+   * `locatorScheme`), and both recompute from the same configuration. Unset
+   * registers none, and every path keeps its previous meaning.
+   */
+  locatorRoots?: LocatorRoot[]
+}
+
+/**
+ * One registered scheme: the model-facing name and the directory it names. Both
+ * halves are configuration, so a scheme resolves to the CURRENT directory on
+ * every call rather than to a path captured when the locator was written.
+ */
+export interface LocatorRoot {
+  /** Scheme as written before the colon — at least two characters, lowercase, no `:`/separator. */
+  scheme: string
+  /** Absolute directory the scheme's paths resolve under, resolved at construction. */
+  root: string
 }
 ```
 <!-- END GENERATED config-catalog:@deepseek-ai/dsh-fs-local -->
@@ -3325,6 +3347,17 @@ export interface Config {
    * slow disk delays the next run instead of overlapping it.
    */
   cleanupIntervalHours?: number
+  /**
+   * Scheme that replaces the absolute path in every saved locator, e.g. `spill`
+   * yields `spill:/session-<hash>/<file>`. Set it TOGETHER with the matching
+   * `locatorRoots` entry on the filesystem backend, both derived from the same
+   * `root`; the locator then survives a relocated home, because the reader
+   * recomputes the directory instead of trusting a stored absolute path. It
+   * requires an explicit {@link Config.root} — a per-process private root has no
+   * meaning to another backend — and omission keeps the previous absolute-path
+   * locators, so an existing composition needs no other change.
+   */
+  locatorScheme?: string
 }
 ```
 <!-- END GENERATED config-catalog:@deepseek-ai/dsh-spill-local -->
@@ -3968,7 +4001,7 @@ export interface Config {
 ## `@deepseek-ai/dsh-tool-fs-search`
 
 - `inject`: `tools` · `systemPrompt` · `subprocess` · `workingDirectory`
-- `source`: [`packages/fs/tool-fs-search/src/index.ts:74`](../packages/fs/tool-fs-search/src/index.ts)
+- `source`: [`packages/fs/tool-fs-search/src/index.ts:75`](../packages/fs/tool-fs-search/src/index.ts)
 
 ```ts config-catalog
 /** Plugin config; over-cap glob sampling is an explicit deployment choice and the remaining fields have defaults. */

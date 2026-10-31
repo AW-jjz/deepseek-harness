@@ -1,0 +1,19 @@
+# Bilingual-pair consistency record for 2026-10-31-spill-locator-schemes.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/implemented/architecture/2026-10-31-spill-locator-schemes.md
+/agent-note-spill-locators-name-a-file-inside-a-root-not-an-absolute-path:
+  en: 4eac7df5ef5d2aa9
+  zh: 7ac910b7900734d4
+/agent-note-spill-locators-name-a-file-inside-a-root-not-an-absolute-path/problem:
+  en: 9b2a23f2ac3f1625
+  zh: bd9910ced94b8beb
+/agent-note-spill-locators-name-a-file-inside-a-root-not-an-absolute-path/decision:
+  en: ac460e84d50e6bbc
+  zh: 655e312a065d902e
+/agent-note-spill-locators-name-a-file-inside-a-root-not-an-absolute-path/alternatives-considered:
+  en: 48943f1a03694f03
+  zh: b455813dfe05667a
+/agent-note-spill-locators-name-a-file-inside-a-root-not-an-absolute-path/consequences:
+  en: b69f9a1ab61918ba
+  zh: c9fbcb79acb78bdc

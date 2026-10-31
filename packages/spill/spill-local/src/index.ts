@@ -17,13 +17,13 @@ import { SpillLocator, SpillStore } from '@deepseek-ai/dsh-spill'
 import type { SaveTextSpill, SpillRef } from '@deepseek-ai/dsh-spill'
 import { gatherSweepRoots, sweepSpillBudget, sweepSpillRoots } from './cleanup.ts'
 import type { SweepRoot, WarnFn } from './cleanup.ts'
-import { privateRoot, saveTextFile } from './store.ts'
+import { privateRoot, locatorFor, saveTextFile } from './store.ts'
 
 export { discoverDefaultRoots, sweepSpillBudget, sweepSpillRoots } from './cleanup.ts'
 export type {
   SpillBudgetOptions, SpillBudgetResult, SpillFileUsage, SweepOptions, SweepRoot, WarnFn,
 } from './cleanup.ts'
-export { DEFAULT_ROOT_PREFIX, encodeSegment, isErrno, privateRoot, saveTextFile, sessionDir } from './store.ts'
+export { DEFAULT_ROOT_PREFIX, encodeSegment, isErrno, locatorFor, privateRoot, saveTextFile, sessionDir } from './store.ts'
 export type { SavedText, SaveTextOptions } from './store.ts'
 
 /** Milliseconds in one day — converts the `cleanupPeriodDays` config to the sweep cutoff. */
@@ -81,10 +81,21 @@ export interface Config {
    * slow disk delays the next run instead of overlapping it.
    */
   cleanupIntervalHours?: number
+  /**
+   * Scheme that replaces the absolute path in every saved locator, e.g. `spill`
+   * yields `spill:/session-<hash>/<file>`. Set it TOGETHER with the matching
+   * `locatorRoots` entry on the filesystem backend, both derived from the same
+   * `root`; the locator then survives a relocated home, because the reader
+   * recomputes the directory instead of trusting a stored absolute path. It
+   * requires an explicit {@link Config.root} — a per-process private root has no
+   * meaning to another backend — and omission keeps the previous absolute-path
+   * locators, so an existing composition needs no other change.
+   */
+  locatorScheme?: string
 }
 
 /** The shape after schemastery applied the defaults. */
-type ResolvedConfig = Required<Omit<Config, 'root'>> & Pick<Config, 'root'>
+type ResolvedConfig = Required<Omit<Config, 'root' | 'locatorScheme'>> & Pick<Config, 'root' | 'locatorScheme'>
 
 /**
  * Local-filesystem spill backend. Files land under `<root>/session-<hash>/…`
@@ -103,10 +114,14 @@ export class LocalSpillStore extends SpillStore {
     cleanupPeriodDays: z.number().step(1).min(0).default(30),
     cleanupTotalBytes: z.number().step(1).min(0).default(DEFAULT_CLEANUP_TOTAL_BYTES),
     cleanupIntervalHours: z.number().min(0).default(DEFAULT_CLEANUP_INTERVAL_HOURS),
+    locatorScheme: z.string(),
   })
 
   /** Resolved absolute spill root (config `root`, else the private default), fixed at construction. */
   readonly root: string
+
+  /** Configured locator scheme, or `undefined` to keep absolute-path locators. */
+  readonly locatorScheme: string | undefined
 
   /** Validated config (schemastery applied the `cleanupPeriodDays` default before construction). */
   readonly config: ResolvedConfig
@@ -120,6 +135,10 @@ export class LocalSpillStore extends SpillStore {
     // cast records that runtime fact for exactOptionalPropertyTypes.
     this.config = config as ResolvedConfig
     this.root = config.root !== undefined ? resolve(config.root) : privateRoot()
+    if (config.locatorScheme !== undefined && config.root === undefined) {
+      throw new Error('spill-local: locatorScheme needs an explicit root — a private per-process root cannot be resolved by another backend')
+    }
+    this.locatorScheme = config.locatorScheme
 
     // One best-effort startup sweep, owned by the fiber. The generator body runs
     // at activation but does NOT await the sweep — it launches it and yields an
@@ -224,7 +243,9 @@ export class LocalSpillStore extends SpillStore {
       content: input.content,
     })
     return {
-      locator: SpillLocator(saved.path),
+      locator: SpillLocator(
+        this.locatorScheme === undefined ? saved.path : locatorFor(this.locatorScheme, this.root, saved.path),
+      ),
       bytes: saved.bytes,
       retrievalHint: 'Use read with offset/limit, or grep this path to search within it.',
     }

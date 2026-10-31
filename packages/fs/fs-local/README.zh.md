@@ -45,8 +45,15 @@ kind: "package-reference"
 |---|---|---|
 | `cwd` | `process.cwd()` | 相对路径的基准目录 |
 | `diffBasisMaxBytes` | `10 MiB` | 每次覆写 diff 一侧的 UTF-8 字节上限；更大的覆写返回 `before: null` |
+| `locatorRoots` | 不注册任何 scheme | 本后端可解析的模型侧 scheme，每项为 `{ scheme, root }`；写成 `<scheme>:/<相对路径>` 的请求随后在 `root` 下打开 |
 
 生成的[配置目录](../../../docs/config-catalog.zh.md#deepseek-aidsh-fs-local)完整列出了所有受支持字段及其 JSDoc。
+
+### 定位方案（locator scheme）
+
+`locatorRoots` 让组合交给模型的路径按文件在已注册目录**之内**的位置指认它，而不是按绝对位置。请求 `spill:/session-ab12/web_fetch.txt` 会在配置的 `root` 下解析，因此通知里携带的句柄在该目录搬迁后仍能打开——主目录换了位置、便携安装改了名都可以——因为写入方与本后端都从同一份配置重新推导该目录。不注册任何 scheme 时，所有路径的含义与之前完全一致，且绝对路径永远不会匹配某个 scheme。scheme 是至少两个字符的小写 token，因此单字母的 Windows 盘符不会被误认；相对部分会做包含性校验：`<scheme>:/../outside` 会以 `FS_PERMISSION_DENIED` 被拒绝，而不是被打开。解析发生在 `resolve` 与 `lstat` 中，位于家目录展开与相对路径锚定之前，因此 scheme 优先于其他所有拼写规则。
+
+随包发布的 base bundle 把 `spill` 注册到 `dshHomePath('spill')`，并在 `dsh-spill-local` 上设置匹配的 `locatorScheme`；需要把目标交给子进程的搜索工具也先通过本 seam 解析同一个 scheme。
 
 ### 你能做什么
 

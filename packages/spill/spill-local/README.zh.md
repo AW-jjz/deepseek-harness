@@ -9,7 +9,7 @@ kind: "package-reference"
 
 ## 概述
 
-`dsh-spill-local` 把调用方的超大文本保存到宿主文件系统中私有的会话级文件，并以该文件路径作为定位信息返回，同时给出告诉模型读取或搜索它的取回指引。只要组合需要在 agent（智能体）运行所在的同一台机器上进行 spill 存储，就挂载它。文件对当前用户私有、名称不可预测，且每个会话的文件归入稳定的目录，因此共享根目录既不会泄露输出，也不会被预置的符号链接重定向。配置选择根目录与启动清理保留期；预览与 spill 决策由其他包负责。
+`dsh-spill-local` 把调用方的超大文本保存到宿主文件系统中私有的会话级文件，并返回一个指向它的定位信息（locator），同时给出告诉模型读取或搜索它的取回指引。只要组合需要在 agent（智能体）运行所在的同一台机器上进行 spill 存储，就挂载它。文件对当前用户私有、名称不可预测，且每个会话的文件归入稳定的目录，因此共享根目录既不会泄露输出，也不会被预置的符号链接重定向。配置选择根目录、保留期，以及定位信息是否使用文件系统后端解析的 scheme（方案）。
 
 ## 目录
 
@@ -38,6 +38,7 @@ kind: "package-reference"
     cleanupPeriodDays: 30
     cleanupTotalBytes: 536870912
     cleanupIntervalHours: 6
+    locatorScheme: spill
 ```
 
 | 字段 | 默认值 | 含义 |
@@ -46,12 +47,19 @@ kind: "package-reference"
 | `cleanupPeriodDays` | `30` | 文件可被清理删除前需经过的天数；`0` 完全禁用清理 |
 | `cleanupTotalBytes` | `536870912`（512 MiB） | 所有 spill 根目录允许占用的总字节数；超出时按由旧到新回收，直到符合预算。最近一小时内写入的文件不会因预算被回收；`0` 禁用预算 |
 | `cleanupIntervalHours` | `6` | 启动清理之后后台清理的间隔小时数；`0` 表示只在启动时清理 |
+| `locatorScheme` | 未设置（绝对路径） | 用 scheme 替换每条定位信息中的绝对路径，形如 `spill:/session-<hash>/<file>`。需要显式 `root`，因为私有进程级根目录对读取方后端没有意义；须与文件系统后端匹配的 `locatorRoots` 条目一起设置 |
 
 生成的[配置目录](../../../docs/config-catalog.zh.md#deepseek-aidsh-spill-local)是每个受支持字段的穷尽式真源。
 
 ### 你会得到什么
 
-每次 `saveText` 调用都会把完整文本写入一个新文件，并返回三个字段：`locator`（文件路径）、`bytes`（精确的 UTF-8 字节数）与 `retrievalHint`——"Use read with offset/limit, or grep this path to search within it."。消费方把该提示展示给模型，模型随后可以用其常规文件工具读取或搜索该文件。
+每次 `saveText` 调用都会把完整文本写入一个新文件，并返回三个字段：`locator`（文件路径，或下文所述的 scheme 限定句柄）、`bytes`（精确的 UTF-8 字节数）与 `retrievalHint`——"Use read with offset/limit, or grep this path to search within it."。消费方把该提示展示给模型，模型随后可以用其常规文件工具读取或搜索该文件。
+
+### 根目录搬迁后仍可用的定位信息
+
+定位信息会写进会话日志，因此它的寿命长于写入它的进程。绝对路径只在根目录原地不动时有效：便携安装改名、`DSH_HOME` 换到别处，该主目录历史里的每条定位信息就都指向一个不再存在的目录。设置 `locatorScheme` 后，定位信息改为按文件**在根目录之内**的位置指认它——`spill:/session-<hash>/<file>`——而文件系统后端用**当前**配置的根目录解析该 scheme（见 `@deepseek-ai/dsh-fs-local` 的 `locatorRoots`）。两侧都从同一个 `dshHomePath('spill')` 表达式推导目录，因此一次搬迁会带着所有旧定位信息一起走。
+
+不设置该字段时行为与之前完全一致：定位信息仍是绝对路径，既有组合无需任何改动。已经写在旧根目录下的绝对路径无法追回——scheme 只保护它启用之后写入的定位信息。
 
 ### 文件存放位置
 

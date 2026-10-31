@@ -137,6 +137,36 @@ describe('privateRoot', () => {
   })
 })
 
+describe('locator scheme', () => {
+  it('spells a saved locator relative to the configured root', async () => {
+    const ctx = new Context()
+    await ctx.plugin(LocalSpillStore, { root, cleanupPeriodDays: 0, locatorScheme: 'spill' })
+    const ref = await ctx.spillStore.saveText(request())
+
+    // The locator carries the position INSIDE the root and never the root, so a
+    // reader that recomputes the root opens it after the home moves.
+    expect(ref.locator.startsWith('spill:/session-')).toBe(true)
+    expect(String(ref.locator).includes(root)).toBe(false)
+    const saved = join(root, ...String(ref.locator).slice('spill:/'.length).split('/'))
+    expect(readFileSync(saved, 'utf8')).toBe('the full body')
+  })
+
+  it('keeps absolute locators when no scheme is configured', async () => {
+    const ctx = new Context()
+    await ctx.plugin(LocalSpillStore, { root, cleanupPeriodDays: 0 })
+    const ref = await ctx.spillStore.saveText(request())
+    expect(isAbsolute(ref.locator)).toBe(true)
+    expect(existsSync(ref.locator)).toBe(true)
+  })
+
+  it('refuses a scheme without an explicit root', async () => {
+    const ctx = new Context()
+    // A private per-process root means nothing to the reading backend, so the
+    // scheme would produce locators nobody can resolve.
+    await expect(ctx.plugin(LocalSpillStore, { cleanupPeriodDays: 0, locatorScheme: 'spill' }))
+      .rejects.toThrow('locatorScheme needs an explicit root')
+  })
+})
 describe('LocalSpillStore service', () => {
   // These tests exercise save/root resolution, not cleanup; disabling the sweep
   // (cleanupPeriodDays: 0) keeps them from scanning/sweeping the real tmpdir.
@@ -666,6 +696,26 @@ describe('spill size budget', () => {
       await store.dispose()
       expect(existsSync(join(dir, 'old.txt'))).toBe(false)
       expect(readFileSync(isAbsolute(spilled.locator) ? spilled.locator : String(spilled.locator), 'utf8')).toHaveLength(200)
+    } finally {
+      await ctx.fiber.dispose()
+    }
+  })
+
+  it('runs the age sweep but skips the byte budget when the budget is disabled', async () => {
+    const ctx = new Context()
+    const store = await ctx.plugin(LocalSpillStore, {
+      root, cleanupPeriodDays: 30, cleanupTotalBytes: 0, cleanupIntervalHours: 0,
+    })
+    try {
+      const dir = sessionDir(root, SessionId('no-budget-session'))
+      mkdirSync(dir, { recursive: true })
+      writeAged(join(dir, 'expired.txt'), 'x', 40)
+      // Far over any budget: with the budget off, only the age cutoff applies.
+      writeAged(join(dir, 'young.txt'), 'x'.repeat(4_000), 2)
+
+      await store.dispose()
+      expect(existsSync(join(dir, 'expired.txt'))).toBe(false)
+      expect(existsSync(join(dir, 'young.txt'))).toBe(true)
     } finally {
       await ctx.fiber.dispose()
     }

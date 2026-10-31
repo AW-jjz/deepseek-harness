@@ -421,10 +421,13 @@
     - id: spill-local
       name: '@deepseek-ai/dsh-spill-local'
       config:
-        # A saved tool result references its spill file by absolute path, so the
-        # root has to survive a restart and a temp-directory cleaner: the same
-        # home-anchored resolver the sessions and storages rows use.
+        # The root has to survive a restart and a temp-directory cleaner: the same
+        # home-anchored resolver the sessions and storages rows use. The scheme
+        # then keeps a saved locator readable after this whole directory moves,
+        # because it names the file by its position INSIDE the root and the
+        # filesystem backend above resolves it against the root configured now.
         root: !!js dshHomePath('spill')
+        locatorScheme: spill
 
     - id: spill-policy
       name: '@deepseek-ai/dsh-spill-policy'
@@ -535,9 +538,16 @@
         agents: []
 
     # The sandboxed filesystem provider. `cwd` defaults to `process.cwd()`; an
-    # overlay can pin another workspace.
+    # overlay can pin another workspace. The `spill` locator scheme resolves the
+    # handles spill notices carry, so a saved result still opens after the home it
+    # was written under moves: keep this root and the `spill-local`
+    # `locatorScheme` below derived from the same directory.
     - id: fs-sandbox
       name: '@deepseek-ai/dsh-fs-sandbox'
+      config:
+        locatorRoots:
+          - scheme: spill
+            root: !!js dshHomePath('spill')
 
     # The native DeepSeek adapter. No key or endpoint is inlined: both resolve per
     # request from the `llm-deepseek:` settings section over this entry, with the

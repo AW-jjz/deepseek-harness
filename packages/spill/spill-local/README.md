@@ -9,7 +9,7 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-`dsh-spill-local` saves a caller's oversized text to a private, session-scoped file on the host filesystem and returns that file's path as the locator, with retrieval guidance telling the model to read or grep it. Mount it whenever a composition needs spill storage on the same machine the agent runs on. Files are private to the current user, names are unpredictable, and each session's files group under a stable directory, so a shared root cannot leak output or be redirected by a planted symlink. Configuration selects the root and the startup-cleanup retention period; previews and spill decisions live in other packages.
+`dsh-spill-local` saves a caller's oversized text to a private, session-scoped file on the host filesystem and returns a locator for it, with retrieval guidance telling the model to read or grep it. Mount it whenever a composition needs spill storage on the same machine the agent runs on. Files are private to the current user, names are unpredictable, and each session groups under a stable directory, so a shared root cannot leak output or be redirected by a planted symlink. Configuration selects the root, the retention period, and whether locators use a scheme the filesystem backend resolves.
 
 ## Table of Contents
 
@@ -38,6 +38,7 @@ Loading the plugin with no config is safe: files land in a lazily-created privat
     cleanupPeriodDays: 30
     cleanupTotalBytes: 536870912
     cleanupIntervalHours: 6
+    locatorScheme: spill
 ```
 
 | Field | Default | Meaning |
@@ -46,12 +47,19 @@ Loading the plugin with no config is safe: files land in a lazily-created privat
 | `cleanupPeriodDays` | `30` | File age in days before cleanup may delete it; `0` disables cleanup entirely |
 | `cleanupTotalBytes` | `536870912` (512 MiB) | Total bytes all spill roots may hold; the oldest files are reclaimed until the roots fit. Files written in the last hour are never reclaimed for the budget; `0` disables it |
 | `cleanupIntervalHours` | `6` | Hours between background sweeps after the startup one; `0` keeps cleanup startup-only |
+| `locatorScheme` | unset (absolute paths) | Scheme that replaces the absolute path in every locator, as in `spill:/session-<hash>/<file>`. Requires an explicit `root`, because a private per-process root means nothing to the reading backend; set it together with the matching `locatorRoots` entry on the filesystem backend |
 
 The generated [configuration catalog](../../../docs/config-catalog.md#deepseek-aidsh-spill-local) is the exhaustive source for every accepted field.
 
 ### What you get back
 
-Each `saveText` call writes the full text to a fresh file and returns three fields: `locator` (the file path), `bytes` (the exact UTF-8 byte count), and `retrievalHint` — "Use read with offset/limit, or grep this path to search within it." A consumer shows that hint to the model, which can then read or search the file with its ordinary file tools.
+Each `saveText` call writes the full text to a fresh file and returns three fields: `locator` (the file path, or the scheme-qualified handle described below), `bytes` (the exact UTF-8 byte count), and `retrievalHint` — "Use read with offset/limit, or grep this path to search within it." A consumer shows that hint to the model, which can then read or search the file with its ordinary file tools.
+
+### Locators that survive a moving home
+
+A locator is persisted into the session log, so it outlives the process that wrote it. An absolute path keeps working only while the root stays where it was: rename the portable install, point `DSH_HOME` somewhere else, and every stored locator in that home's history points at a directory that no longer exists. Setting `locatorScheme` makes the locator name the file by its position **inside** the root — `spill:/session-<hash>/<file>` — and the filesystem backend resolves that scheme against the root it is configured with **now** (see `locatorRoots` in `@deepseek-ai/dsh-fs-local`). Both sides derive the directory from the same `dshHomePath('spill')` expression, so a move carries every old locator with it.
+
+Leaving the field unset preserves the previous behavior exactly: locators stay absolute paths, and an existing composition needs no change. Absolute paths already stored under a moved root cannot be recovered — a scheme only protects locators written after it is enabled.
 
 ### Where files land
 

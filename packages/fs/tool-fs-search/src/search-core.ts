@@ -26,6 +26,7 @@ import { HarnessError } from '@deepseek-ai/dsh-llm'
 import { ItemRetainer, TextRetainer } from '@deepseek-ai/dsh-output-retention'
 import type { RetainedItems } from '@deepseek-ai/dsh-output-retention'
 import type { SubprocessHandle, SubprocessOutcome, SubprocessOutputRead, SubprocessSpawnSpec } from '@deepseek-ai/dsh-subprocess'
+import type {} from '@deepseek-ai/dsh-fs'
 import type { SaveTextSpill, SpillRef } from '@deepseek-ai/dsh-spill'
 import type { ToolExecution } from '@deepseek-ai/dsh-tools'
 
@@ -311,6 +312,31 @@ export interface GrepMatch {
   path: string
   lineNumber: number
   line: string
+}
+
+/**
+ * A locator-shaped target: `<scheme>:/…` with a scheme of at least two
+ * characters, so a single-letter Windows drive prefix never matches.
+ */
+const LOCATOR_SHAPED = /^[a-z][a-z0-9+.-]+:[/\\]/
+
+/**
+ * Turn a model-supplied search target into something the spawned ripgrep can
+ * open. A locator (the `<scheme>:/…` handle a spill notice hands the model) is
+ * not a real path, so it goes through the filesystem seam and comes back as that
+ * target's process path; every other target passes through untouched, keeping
+ * ripgrep's own relative resolution and the workdir-relative display intact.
+ *
+ * @param ctx - host context providing the filesystem seam.
+ * @param path - the requested search target, when the caller gave one.
+ * @returns the path to hand ripgrep, or `undefined` when no target was given.
+ * @throws Error when a locator is requested and no filesystem backend is loaded.
+ */
+export async function searchTargetPath(ctx: Context, path: string | undefined): Promise<string | undefined> {
+  if (path === undefined || !LOCATOR_SHAPED.test(path)) return path
+  const fs = ctx.get('fs')
+  if (fs === undefined) throw new Error(`cannot search "${path}": a locator needs a filesystem backend`)
+  return fs.processPath(await fs.resolve(path))
 }
 
 /**

@@ -49,6 +49,30 @@ describe('dsh-base bundle', () => {
     expect(manifest.dependencies).toHaveProperty('@deepseek-ai/dsh-web-fetch-http')
   })
 
+  it('wires the spill locator scheme from one home expression on both sides', () => {
+    const root = fileURLToPath(new URL('..', import.meta.url))
+    const parsed = yaml.load(
+      readFileSync(resolve(root, 'cordis.patch.yml'), 'utf8'),
+      { schema: entryListSchema },
+    )
+    if (!Array.isArray(parsed)) throw new TypeError('base patch must parse to a patch list')
+    const rows = parsed.flatMap((patch): Record<string, unknown>[] =>
+      typeof patch === 'object' && patch !== null
+        ? (patch as { insert?: Record<string, unknown>[] }).insert ?? []
+        : [],
+    )
+    const spill = rows.find(row => row.id === 'spill-local')
+    const fs = rows.find(row => row.id === 'fs-sandbox')
+    if (spill === undefined || fs === undefined) throw new Error('the base bundle must mount spill-local and fs-sandbox')
+    const spillConfig = spill.config as { root?: unknown; locatorScheme?: string }
+    const fsConfig = fs.config as { locatorRoots?: unknown }
+    // The locator only reopens after the home moves while BOTH sides resolve the
+    // same directory, so the two expressions are pinned to be the same source.
+    expect(spillConfig.locatorScheme).toBe('spill')
+    expect(fsConfig.locatorRoots).toEqual([{ scheme: 'spill', root: spillConfig.root }])
+    expect(spillConfig.root).toEqual({ __jsExpr: "dshHomePath('spill')" })
+  })
+
   it('gates each shell stack by platform with a symmetric disabled expression', () => {
     const root = fileURLToPath(new URL('..', import.meta.url))
     const parsed = yaml.load(

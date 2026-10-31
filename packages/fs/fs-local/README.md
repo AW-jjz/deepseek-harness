@@ -45,8 +45,15 @@ Load the backend with a base directory; relative paths resolve against it, and a
 |---|---|---|
 | `cwd` | `process.cwd()` | Base directory for relative paths |
 | `diffBasisMaxBytes` | `10 MiB` | UTF-8 byte limit per overwrite-diff side; larger overwrites return `before: null` |
+| `locatorRoots` | none registered | Model-facing schemes this backend resolves, each `{ scheme, root }`; a request written `<scheme>:/<relative>` then opens under `root` |
 
 The generated [configuration catalog](../../../docs/config-catalog.md#deepseek-aidsh-fs-local) is the exhaustive source for every accepted field and its JSDoc.
+
+### Locator schemes
+
+`locatorRoots` lets a composition hand the model a path that names a file by its position inside a registered directory instead of by an absolute location. A request for `spill:/session-ab12/web_fetch.txt` resolves under the configured `root`, so the handle a notice carried keeps opening after that directory moves — a relocated harness home, a renamed portable install — because both the writer and this backend recompute the directory from the same configuration. Registering nothing leaves every path with its previous meaning, and an absolute path never matches a scheme. A scheme is a lower-case token of at least two characters, so a single-letter Windows drive prefix cannot be mistaken for one, and the relative part is containment-checked: `<scheme>:/../outside` is refused with `FS_PERMISSION_DENIED` rather than opened. Resolution happens in `resolve` and `lstat`, before home expansion or relative anchoring, so the scheme wins over every other spelling rule.
+
+The shipped base bundle registers `spill` against `dshHomePath('spill')` and sets the matching `locatorScheme` on `dsh-spill-local`; a search tool that must hand the target to a subprocess resolves the same scheme through this seam first.
 
 ### What you can do
 

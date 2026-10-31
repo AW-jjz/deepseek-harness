@@ -9,7 +9,7 @@
 import { createHash, randomBytes } from 'node:crypto'
 import { mkdtempSync } from 'node:fs'
 import { mkdir, open } from 'node:fs/promises'
-import { join } from 'node:path'
+import { join, relative, sep } from 'node:path'
 import { tmpdir } from 'node:os'
 
 /** Prefix shared by default-root creation and startup discovery. */
@@ -78,6 +78,23 @@ export function encodeSegment(raw: string): string {
 export function sessionDir(root: string, sessionId: string): string {
   const hash = createHash('sha256').update(sessionId).digest('hex').slice(0, 12)
   return join(root, `session-${hash}`)
+}
+
+/**
+ * Spell a saved path as a scheme-qualified locator, `<scheme>:/<root-relative>`.
+ * The root is deliberately absent from the locator: the splitting backend's
+ * filesystem resolves the scheme against the directory configured NOW, which is
+ * what keeps a locator readable after the spill root moves. Separators are
+ * always `/`, so a session log written on one platform reads the same on the
+ * other.
+ *
+ * @param scheme The scheme configured for this store (no colon).
+ * @param root The spill root the saved path lives under.
+ * @param path The saved absolute path.
+ * @returns The scheme-qualified, root-relative locator.
+ */
+export function locatorFor(scheme: string, root: string, path: string): string {
+  return `${scheme}:/${relative(root, path).split(sep).join('/')}`
 }
 
 /** Inputs needed to save a local spill file. */
