@@ -32,11 +32,28 @@ function isMaintained(file: string): boolean {
 }
 
 /**
+ * Decide whether a hexadecimal run is shaped like a commit identifier rather than a number.
+ *
+ * A run of only decimal digits is a size, a count, or a timestamp far more often than an
+ * abbreviated identifier: `python/sdk/uv.lock` records `size = 6344383` for a wheel, and that
+ * number resolves to exactly one commit in a complete object database. Nothing in the digits
+ * themselves separates the two readings, so an abbreviated candidate must contain a letter.
+ * A complete identifier stays unambiguous — a 40-digit SHA-1 whose every digit happens to be
+ * decimal would be a (10/16)^40 accident — so a pasted full hash is still rejected.
+ * @param candidate - Hexadecimal run matched by {@link commitCandidate}.
+ * @returns Whether the run contains a letter, which only an identifier reliably does.
+ */
+function isCommitShaped(candidate: string): boolean {
+  return /[a-f]/iu.test(candidate)
+}
+
+/**
  * Inspect a maintained source file against known commit identifiers.
  * @param file - Repository-relative path used in diagnostics and exclusions.
  * @param source - File text or a symlink's stored target.
  * @param commits - Lowercase, unambiguous full or abbreviated commit identifiers.
- * @returns One finding per line and reference kind; digests and other Git object types are accepted.
+ * @returns One finding per line and reference kind; digests, other Git object types, and
+ *   decimal-only runs that collide with a commit name are accepted.
  */
 export function findRepositoryReferences(
   file: string,
@@ -49,9 +66,9 @@ export function findRepositoryReferences(
     if (organizationUrl.test(canonicalReferenceText(line).replace(kitRepositoryUrl, ''))) {
       references.push({ file, line: index + 1, kind: 'organization-url' })
     }
-    if ([...line.matchAll(commitCandidate)].some(match => commits.has(match[0].toLowerCase()))) {
-      references.push({ file, line: index + 1, kind: 'commit-hash' })
-    }
+    const namesCommit = [...line.matchAll(commitCandidate)]
+      .some(match => isCommitShaped(match[0]) && commits.has(match[0].toLowerCase()))
+    if (namesCommit) references.push({ file, line: index + 1, kind: 'commit-hash' })
   }
   return references
 }

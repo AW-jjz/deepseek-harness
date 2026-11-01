@@ -140,6 +140,29 @@ describe('maintained repository reference policy', () => {
     expect(scanRepositoryReferences(fixture.root)).toEqual([])
   })
 
+  it('accepts a decimal-only run that names one commit and rejects the same run written with a letter', () => {
+    const commits = new Set(['6344383', '6344383a'])
+    const wheel = '    { url = "cp312-musllinux_1_2_aarch64.whl", hash = "sha256:e4919", size = 6344383, upload-time = "2026-07-01T11:54:15.756Z" },'
+    expect(findRepositoryReferences('python/sdk/uv.lock', wheel, commits)).toEqual([])
+    expect(findRepositoryReferences('notes.md', 'fixed by 6344383a, see above', commits))
+      .toEqual([{ file: 'notes.md', line: 1, kind: 'commit-hash' }])
+  })
+
+  it('accepts a real wheel size whose seven digits resolve to one commit', (test) => {
+    const fixture = repository(test)
+    let decimal: string | undefined
+    for (let index = 0; index < 512 && decimal === undefined; index += 1) {
+      const body = `tree ${fixture.tree}\nauthor T <t@example.invalid> 0 +0000\n`
+        + `committer T <t@example.invalid> 0 +0000\n\nwheel ${String(index)}\n`
+      const object = fixture.git(['hash-object', '-t', 'commit', '-w', '--stdin'], body)
+      if (/^\d{7}$/u.test(object.slice(0, 7))) decimal = object.slice(0, 7)
+    }
+    if (decimal === undefined) throw new Error('fixture must find a commit whose seven-digit prefix is decimal')
+    fixture.write('python/sdk/uv.lock', `    { size = ${decimal}, upload-time = "2026-07-01T11:54:15.756Z" },\n`)
+    expect(fixture.git(['cat-file', '-t', decimal])).toBe('commit')
+    expect(scanRepositoryReferences(fixture.root)).toEqual([])
+  })
+
   it('accepts a prefix that two available commits share and rejects a longer unique prefix', (test) => {
     const fixture = repository(test)
     const [first, second] = collidingCommitBodies(fixture.tree, 7).map(body =>
