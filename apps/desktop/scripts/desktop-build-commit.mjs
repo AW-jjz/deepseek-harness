@@ -63,7 +63,7 @@ export function desktopBuildCommitEnvironment(packaged) {
 export const DESKTOP_ALLOW_DIRTY_BUILD_ENV = 'DSH_DESKTOP_ALLOW_DIRTY_BUILD'
 
 /**
- * Refuse to package a build whose provenance cannot be checked.
+ * Refuse to package a build whose identity cannot be checked.
  *
  * Three properties are enforced before any artifact exists: the recorded commit must
  * exist in this repository (a build from another clone records a hash nobody here can
@@ -74,29 +74,29 @@ export const DESKTOP_ALLOW_DIRTY_BUILD_ENV = 'DSH_DESKTOP_ALLOW_DIRTY_BUILD'
  * @param {string} appRoot - Desktop package directory that declares the Electron version.
  * @param {{ commit: string, dirty: boolean }} packaged - Commit and tree state being packaged.
  * @param {NodeJS.ProcessEnv} [env] - Environment deciding whether a dirty build is accepted.
- * @returns {{ commit: string, dirty: boolean, electron: string }} Provenance facts for the packaging log.
+ * @returns {{ commit: string, dirty: boolean, electron: string }} Identity facts for the packaging log.
  */
-export function assertDesktopBuildProvenance(repositoryRoot, appRoot, packaged, env = process.env) {
+export function assertDesktopBuildIdentity(repositoryRoot, appRoot, packaged, env = process.env) {
   const git = args => execFileSync('git', args, { cwd: repositoryRoot, encoding: 'utf8' }).trim()
   try {
     // A missing object is the expected rejection, so its git diagnostic stays out of the log.
     execFileSync('git', ['cat-file', '-e', `${packaged.commit}^{commit}`], { cwd: repositoryRoot, stdio: 'ignore' })
   } catch {
-    throw new Error(`desktop build provenance: commit ${packaged.commit} is not present in ${repositoryRoot};`
+    throw new Error(`desktop build identity: commit ${packaged.commit} is not present in ${repositoryRoot};`
       + ' refusing to package a build whose sources cannot be resolved here')
   }
   const allowDirty = env[DESKTOP_ALLOW_DIRTY_BUILD_ENV]?.trim() === '1'
   if (packaged.dirty && !allowDirty) {
-    throw new Error('desktop build provenance: the checkout has uncommitted changes;'
+    throw new Error('desktop build identity: the checkout has uncommitted changes;'
       + ` commit them or set ${DESKTOP_ALLOW_DIRTY_BUILD_ENV}=1 for an internal build that must not be distributed`)
   }
   const require = createRequire(import.meta.url)
   const declared = JSON.parse(readFileSync(join(appRoot, 'package.json'), 'utf8')).devDependencies?.electron
-  if (typeof declared !== 'string') throw new Error('desktop build provenance: apps/desktop/package.json declares no Electron version')
+  if (typeof declared !== 'string') throw new Error('desktop build identity: apps/desktop/package.json declares no Electron version')
   const expected = declared.replace(/^[\^~]/u, '')
   const installed = JSON.parse(readFileSync(require.resolve('electron/package.json', { paths: [appRoot] }), 'utf8')).version
   if (installed !== expected) {
-    throw new Error(`desktop build provenance: node_modules carries Electron ${installed} but the package declares ${expected};`
+    throw new Error(`desktop build identity: node_modules carries Electron ${installed} but the package declares ${expected};`
       + ' the packaged runtime would not match the declared version')
   }
   return { ...packaged, electron: installed }

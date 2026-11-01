@@ -22,7 +22,7 @@ import { notarizeMacOS } from './notarize-macos.mjs'
 import { resolveMacOSNotarizationEnvironment } from './desktop-release-environment.mjs'
 import { DESKTOP_BUILD_VERSION_ENV, resolveDesktopBuildVersion, validateDesktopBuildVersion } from './desktop-build-version.mjs'
 import { suggestDesktopBuildVersion } from './desktop-build-version-discovery.ts'
-import { assertDesktopBuildProvenance, desktopBuildCommitEnvironment, readDesktopBuildCommit, resolveDesktopBuildCommit } from './desktop-build-commit.mjs'
+import { assertDesktopBuildIdentity, desktopBuildCommitEnvironment, readDesktopBuildCommit, resolveDesktopBuildCommit } from './desktop-build-commit.mjs'
 import { requireDesktopToolchain } from './desktop-toolchain-preflight.ts'
 import { withMacOSNotarizationProxy } from './macos-notarization-proxy.ts'
 import { shouldExposeInternals } from '../src/host-process.ts'
@@ -364,16 +364,16 @@ async function main(): Promise<void> {
   }
   process.stdout.write(`desktop package: ${target.name} publishes ${buildVersion}${buildVersion === productVersion ? '' : ` for product version ${productVersion}`}\n`)
   const packaged = readDesktopBuildCommit(REPOSITORY_ROOT)
-  // Provenance gate: no artifact may exist whose commit, tree state, or Electron version
+  // Identity gate: no artifact may exist whose commit, tree state, or Electron version
   // cannot be checked against this checkout (see the S0 postmortem).
-  const provenance = assertDesktopBuildProvenance(REPOSITORY_ROOT, APP_ROOT, packaged, environment)
+  const identity = assertDesktopBuildIdentity(REPOSITORY_ROOT, APP_ROOT, packaged, environment)
   Object.assign(environment, desktopBuildCommitEnvironment(packaged))
-  process.stdout.write(`desktop package: sources ${provenance.commit.slice(0, 12)}${provenance.dirty ? ' (dirty, internal only)' : ''}, Electron ${provenance.electron}\n`)
+  process.stdout.write(`desktop package: sources ${identity.commit.slice(0, 12)}${identity.dirty ? ' (dirty, internal only)' : ''}, Electron ${identity.electron}\n`)
   // R-16 internals gate: while the pinned addon rejects the pinned Electron, the flag is the only
   // working internals leg, so a default that stops passing it would ship an installer that cannot
   // boot. Judged here, before a run directory or an artifact exists.
   const internals = assertInternalsMatrixGate({
-    electronVersion: provenance.electron, exposesInternals: shouldExposeInternals({}),
+    electronVersion: identity.electron, exposesInternals: shouldExposeInternals({}),
   })
   process.stdout.write(`desktop package: internals matrix: ${internals.reason}\n`)
   if (!internals.addonCoversElectron) {

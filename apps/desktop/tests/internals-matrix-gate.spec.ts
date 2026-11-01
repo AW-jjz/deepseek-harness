@@ -10,7 +10,7 @@ import {
 const APP_ROOT = resolve(import.meta.dirname, '..')
 const REPOSITORY_ROOT = resolve(APP_ROOT, '..', '..')
 
-/** Electron the desktop package declares, which provenance requires node_modules to match. */
+/** Electron the desktop package declares, which identity requires node_modules to match. */
 function declaredElectron(): string {
   const manifest = JSON.parse(readFileSync(join(APP_ROOT, 'package.json'), 'utf8')) as {
     devDependencies?: Record<string, string>

@@ -45,7 +45,7 @@ export const INTERNALS_MATRIX: InternalsMatrix = {
 
 /** Everything the gate needs to decide, all of it known before packaging starts. */
 export interface InternalsMatrixGateInput {
-  /** Electron version this build pins, as the packaging provenance recorded it. */
+  /** Electron version this build pins, as the packaging identity recorded it. */
   readonly electronVersion: string
   /** Whether the Host child is started with `--expose-internals` under the default decision. */
   readonly exposesInternals: boolean

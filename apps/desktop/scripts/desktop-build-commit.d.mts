@@ -34,23 +34,23 @@ export function desktopBuildCommitEnvironment(packaged: DesktopBuildCommit): Rec
 /** Environment variable that lets an internal build accept an uncommitted tree. */
 export const DESKTOP_ALLOW_DIRTY_BUILD_ENV: 'DSH_DESKTOP_ALLOW_DIRTY_BUILD'
 
-/** Provenance facts a packaging run records once the gate admits the build. */
-export interface DesktopBuildProvenance extends DesktopBuildCommit {
+/** Identity facts a packaging run records once the gate admits the build. */
+export interface DesktopBuildIdentity extends DesktopBuildCommit {
   /** Electron version installed in `node_modules`, which packaging actually ships. */
   readonly electron: string
 }
 
 /**
- * Refuse to package a build whose provenance cannot be checked.
+ * Refuse to package a build whose identity cannot be checked.
  * @param repositoryRoot - Checkout the build is packaged from.
  * @param appRoot - Desktop package directory that declares the Electron version.
  * @param packaged - Commit and tree state being packaged.
  * @param env - Environment deciding whether a dirty build is accepted.
- * @returns Provenance facts for the packaging log.
+ * @returns Identity facts for the packaging log.
  */
-export function assertDesktopBuildProvenance(
+export function assertDesktopBuildIdentity(
   repositoryRoot: string,
   appRoot: string,
   packaged: DesktopBuildCommit,
   env?: NodeJS.ProcessEnv,
-): DesktopBuildProvenance
+): DesktopBuildIdentity

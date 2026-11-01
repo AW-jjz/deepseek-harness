@@ -6,7 +6,7 @@ import {
   DESKTOP_ALLOW_DIRTY_BUILD_ENV,
   DESKTOP_BUILD_COMMIT_ENV,
   DESKTOP_BUILD_DIRTY_ENV,
-  assertDesktopBuildProvenance,
+  assertDesktopBuildIdentity,
   desktopBuildCommitEnvironment,
   readDesktopBuildCommit,
   resolveDesktopBuildCommit,
@@ -51,18 +51,18 @@ describe('desktop build commit', () => {
   })
 })
 
-describe('desktop build provenance gate', () => {
+describe('desktop build identity gate', () => {
   it('rejects a commit this checkout cannot resolve, as a build from another clone records', () => {
-    expect(() => assertDesktopBuildProvenance(REPOSITORY_ROOT, APP_ROOT, { commit: COMMIT, dirty: false }, {}))
+    expect(() => assertDesktopBuildIdentity(REPOSITORY_ROOT, APP_ROOT, { commit: COMMIT, dirty: false }, {}))
       .toThrow(/is not present in/u)
   })
 
   it('rejects an uncommitted tree unless the caller accepts an internal build', () => {
     const head = readDesktopBuildCommit(REPOSITORY_ROOT).commit
-    expect(() => assertDesktopBuildProvenance(REPOSITORY_ROOT, APP_ROOT, { commit: head, dirty: true }, {}))
+    expect(() => assertDesktopBuildIdentity(REPOSITORY_ROOT, APP_ROOT, { commit: head, dirty: true }, {}))
       .toThrow(/uncommitted changes/u)
     // Accepted with the explicit override; the Electron check still runs and passes here.
-    expect(assertDesktopBuildProvenance(REPOSITORY_ROOT, APP_ROOT, { commit: head, dirty: true },
+    expect(assertDesktopBuildIdentity(REPOSITORY_ROOT, APP_ROOT, { commit: head, dirty: true },
       { [DESKTOP_ALLOW_DIRTY_BUILD_ENV]: '1' })).toEqual({ commit: head, dirty: true, electron: expect.stringMatching(/^\d+\.\d+\.\d+/u) as string })
   })
 
@@ -73,7 +73,7 @@ describe('desktop build provenance gate', () => {
     await writeFile(join(app, 'package.json'), JSON.stringify({ devDependencies: { electron: '1.2.3' } }))
     // Resolution of `electron/package.json` from the temporary root fails or finds another version;
     // either way the gate must not pass silently.
-    expect(() => assertDesktopBuildProvenance(REPOSITORY_ROOT, app, { commit: head, dirty: false }, {}))
+    expect(() => assertDesktopBuildIdentity(REPOSITORY_ROOT, app, { commit: head, dirty: false }, {}))
       .toThrow(/Electron|Cannot find module/u)
   })
 })
