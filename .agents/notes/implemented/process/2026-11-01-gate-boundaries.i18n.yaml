@@ -1,0 +1,22 @@
+# Bilingual-pair consistency record for 2026-11-01-gate-boundaries.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/implemented/process/2026-11-01-gate-boundaries.md
+/agent-note-two-gates-now-say-what-they-cannot-read:
+  en: 41159af31caa1f48
+  zh: 937683df89e8a2b6
+/agent-note-two-gates-now-say-what-they-cannot-read/problem:
+  en: 2f60e450a5ebf514
+  zh: 1995f55c6a143288
+/agent-note-two-gates-now-say-what-they-cannot-read/decision:
+  en: 8bee153b2e7f39b8
+  zh: 3e21ba311b870b3e
+/agent-note-two-gates-now-say-what-they-cannot-read/alternatives-considered:
+  en: 0dcc705476ddb82d
+  zh: f7cb9c4643a8c15b
+/agent-note-two-gates-now-say-what-they-cannot-read/consequences:
+  en: 8ae9b988524cdde3
+  zh: 630ac26416b6bb8a
+/agent-note-two-gates-now-say-what-they-cannot-read/evidence:
+  en: ff3705ac724c586b
+  zh: b036f07193bd5886
