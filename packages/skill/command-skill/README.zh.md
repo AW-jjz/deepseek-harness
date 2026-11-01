@@ -7,11 +7,11 @@ kind: "package-reference"
 
 [English](README.md) | 中文
 
-## Summary
+## 概述
 
 `dsh-command-skill` 是项目技能审批的人机界面。`.dsh/skills` 或 `.agents/skills` 下的技能由克隆出的仓库作者撰写，因此一旦启用该要求，提供方会把它保留在你自己的目录里，但在你批准之前不交给模型。`/skills` 列出每个项目技能及其状态；`/skills approve <name>` 钉住确切的指令文本；`/skills revoke` 收回决定。编辑已批准的技能，或拉取一个编辑了它的提交，会自动使该批准失效。
 
-## Table of Contents
+## 目录
 
 - [使用本包](#use-this-package)
 - [理解实现](#understand-the-implementation)
@@ -143,7 +143,7 @@ kind: "package-reference"
 - **是内容，不是能力** —— 批准一个技能是批准它的指令。指令让模型执行的东西仍要经过常规的工具、沙箱与权限边界。
 
 <a id="dev-note"></a>
-### 开发者注记
+### 开发备注
 
 <details>
 <summary>维护者工作上下文 —— 点击展开</summary>
