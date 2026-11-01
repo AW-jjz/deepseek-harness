@@ -28,7 +28,7 @@ import {
   placeWindow, readWindowGeometry, writeWindowGeometry, type WindowPlacement, type WorkArea,
 } from './window-state.ts'
 import { DesktopProjectManager } from './project-manager.ts'
-import { DesktopHostFatalError, DesktopHostProcess, DesktopHostUncleanExitError } from './host-process.ts'
+import { DesktopHostFatalError, DesktopHostProcess, DesktopHostUncleanExitError, type DesktopHostStopStage } from './host-process.ts'
 import { DesktopPlatformView, PLATFORM_IPC, platformBounds } from './platform-view.ts'
 import { installDesktopFileDrag } from './file-drag.ts'
 import { installDesktopDirectoryPicker } from './directory-picker.ts'
@@ -478,6 +478,24 @@ async function main(): Promise<void> {
   let tray: DesktopTray | undefined
   const isQuitting = (): boolean => quitting
   const currentMainWindow = (): BrowserWindow | undefined => mainWindow
+  /**
+   * Show that a quit is still making progress. A graceful Host stop can wait up
+   * to twenty seconds across three signals, so the window shows an
+   * indeterminate taskbar progress instead of looking frozen; the bar is
+   * cleared as soon as the stop settles.
+   */
+  const reportStopProgress = (stage: DesktopHostStopStage): void => {
+    const window = currentMainWindow()
+    if (window === undefined || window.isDestroyed()) return
+    // Windows renders `error` as a red bar; both modes are the platform's own
+    // "still working" affordance, which the ignored value keeps progress-less.
+    window.setProgressBar(2, { mode: stage === 'sigkill' ? 'error' : 'indeterminate' })
+  }
+  const clearStopProgress = (): void => {
+    const window = currentMainWindow()
+    if (window === undefined || window.isDestroyed()) return
+    window.setProgressBar(-1)
+  }
   const ordinaryDialogs = new Set<AbortController>()
   const currentDialogWindow = (): BrowserWindow | undefined => welcomeWindow ?? mainWindow
   const updateOverlays = new DesktopUpdateOverlays()
@@ -578,7 +596,7 @@ async function main(): Promise<void> {
     const host = new DesktopHostProcess(resources.node, resources.dsh, activeProject,
       hostInspectPort, { ...hostEnvironment, DSH_CLIENT_VERSION: desktopClientVersion() }, onFailure,
       primaryRuntime,
-      resources, (next) => { platformView.setSession(next) })
+      resources, (next) => { platformView.setSession(next) }, (stage) => { reportStopProgress(stage) })
     return {
       start: async () => {
         const ready = await host.start()
@@ -659,6 +677,8 @@ async function main(): Promise<void> {
           if (!requireCleanStop || !(error instanceof DesktopHostUncleanExitError)) throw error
           // Backend cleanup succeeded; installation still rejects the unsuccessful task teardown.
           updateStopFailure = error
+        } finally {
+          clearStopProgress()
         }
       },
       updateTasks: (action: 'inspect' | 'lock' | 'unlock') => host.updateTasks(action),
@@ -813,7 +833,9 @@ async function main(): Promise<void> {
     // A confirmation on a hidden window would go unseen, so it waits for the next show; the mandatory
     // flow keeps its own taskbar and Dock attention instead.
     if (!isMandatory()) await windowShown()
-    if (quitting) return state
+    // Read through the accessor: awaiting above can let a quit set the flag, which
+    // a direct read would have narrowed to the pre-await value.
+    if (isQuitting()) return state
     return updates.install(version)
   }
   const windowShown = (): Promise<void> => new Promise((resolve) => {

@@ -118,6 +118,54 @@ async function exitsWithin(exit: Promise<void>, milliseconds: number): Promise<b
   }
 }
 
+/** Stage of the shutdown ladder that ended a teardown: how the Host had to be stopped. */
+export type DesktopHostStopStage = 'graceful' | 'sigterm' | 'sigkill'
+
+/** Per-stage deadlines of the shutdown ladder, in milliseconds. */
+export interface DesktopHostStopDeadlines {
+  /** Time the Host gets to finish its own shutdown before a termination signal. */
+  readonly graceful: number
+  /** Time a terminated Host gets to exit before SIGKILL. */
+  readonly sigterm: number
+  /** Time a SIGKILLed Host gets to be reaped before teardown gives up. */
+  readonly sigkill: number
+}
+
+/** Shutdown deadlines in force for a real Host process. */
+export const DESKTOP_HOST_STOP_DEADLINES: DesktopHostStopDeadlines = { graceful: 10_000, sigterm: 5_000, sigkill: 5_000 }
+
+/**
+ * Await Host exit, escalating termination when it does not come.
+ *
+ * The ladder is the only thing standing between a quit and a silently frozen
+ * window for up to twenty seconds, so every step reports itself: a teardown
+ * that has to escalate leaves a record of which stage it reached instead of a
+ * bare gap in the log.
+ * @param exited - settles when the Host process is gone.
+ * @param terminate - asks the caller's process handle for one termination signal.
+ * @param onStage - receives the stage that is being entered, in order.
+ * @param deadlines - per-stage waits; production uses {@link DESKTOP_HOST_STOP_DEADLINES}.
+ * @returns whether the Host stopped on its own, without any termination signal.
+ */
+export async function awaitHostExit(
+  exited: Promise<void>,
+  terminate: (signal: 'SIGTERM' | 'SIGKILL') => void,
+  onStage?: (stage: DesktopHostStopStage) => void,
+  deadlines: DesktopHostStopDeadlines = DESKTOP_HOST_STOP_DEADLINES,
+): Promise<{ readonly graceful: boolean }> {
+  onStage?.('graceful')
+  if (await exitsWithin(exited, deadlines.graceful)) return { graceful: true }
+  onStage?.('sigterm')
+  terminate('SIGTERM')
+  if (await exitsWithin(exited, deadlines.sigterm)) return { graceful: false }
+  onStage?.('sigkill')
+  terminate('SIGKILL')
+  if (!await exitsWithin(exited, deadlines.sigkill)) {
+    throw new Error('dsh desktop host did not exit after SIGKILL')
+  }
+  return { graceful: false }
+}
+
 /** Browser authentication URL reported by the running Web application. */
 export interface DesktopHostReady {
   readonly url: string
@@ -215,6 +263,13 @@ export class DesktopHostProcess {
     private readonly packageManager?: { readonly pnpm: string; readonly nodeBin: string },
 
     private readonly onPlatformSession?: (session: PlatformSession | null) => void,
+
+    /**
+     * Receives the shutdown-ladder stage that had to be entered, so a shell can
+     * show that a quit is still in progress instead of leaving the window
+     * unresponsive for up to twenty seconds.
+     */
+    private readonly onStopProgress?: (stage: DesktopHostStopStage) => void,
   ) {}
 
   /**
@@ -376,14 +431,15 @@ export class DesktopHostProcess {
     this.onPlatformSession?.(null)
     if (child.connected) child.send({ type: 'shutdown' }, (error) => { if (error !== null) this.fail(error) })
     const exited = this.exitPromise ?? Promise.resolve()
-    const graceful = await exitsWithin(exited, 10_000)
-    if (!graceful) child.kill('SIGTERM')
-    if (!await exitsWithin(exited, 5_000)) {
-      child.kill('SIGKILL')
-      if (!await exitsWithin(exited, 5_000)) {
-        throw new Error('dsh desktop host did not exit after SIGKILL')
-      }
-    }
+    const { graceful } = await awaitHostExit(
+      exited,
+      (signal) => { child.kill(signal) },
+      (stage) => {
+        this.onStopProgress?.(stage)
+        if (stage === 'graceful') console.info('dsh desktop host: shutdown requested; waiting for the Host to exit on its own')
+        else console.warn(`dsh desktop host: ${stage === 'sigterm' ? 'the Host did not finish shutting down on its own; sending SIGTERM' : 'the Host ignored SIGTERM; sending SIGKILL'} (pid ${String(child.pid)})`)
+      },
+    )
     this.child = undefined
     this.stopOutcome = {
       graceful, exitCode: child.exitCode, signalCode: child.signalCode, shutdownCompleted: this.shutdownCompleted,

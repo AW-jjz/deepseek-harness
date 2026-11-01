@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { DesktopHostFatalError, DesktopHostProcess, DesktopHostUncleanExitError, QUIT_INSPECTION_DEADLINE_MS } from '../src/host-process.ts'
+import { DesktopHostFatalError, DesktopHostProcess, DesktopHostUncleanExitError, QUIT_INSPECTION_DEADLINE_MS, awaitHostExit, type DesktopHostStopStage } from '../src/host-process.ts'
 
 const roots: string[] = []
 const hosts: DesktopHostProcess[] = []
@@ -179,6 +179,43 @@ describe('desktop host process', () => {
     await expect(host.stop(true)).resolves.toBeUndefined()
   })
 
+  it('reports the graceful stage and stops without a termination signal', async () => {
+    let exit!: () => void
+    const exited = new Promise<void>((resolve) => { exit = resolve })
+    const stages: DesktopHostStopStage[] = []
+    const signals: string[] = []
+    const stopping = awaitHostExit(exited, (signal) => { signals.push(signal) },
+      (stage) => { stages.push(stage) }, { graceful: 20, sigterm: 20, sigkill: 20 })
+    exit()
+    expect(await stopping).toEqual({ graceful: true })
+    expect(stages).toEqual(['graceful'])
+    expect(signals).toEqual([])
+  })
+
+  it('escalates to SIGTERM and reports the stage that produced the exit', async () => {
+    let exit!: () => void
+    const exited = new Promise<void>((resolve) => { exit = resolve })
+    const stages: DesktopHostStopStage[] = []
+    const signals: string[] = []
+    const result = await awaitHostExit(exited, (signal) => {
+      signals.push(signal)
+      exit()
+    }, (stage) => { stages.push(stage) }, { graceful: 5, sigterm: 20, sigkill: 20 })
+    expect(result).toEqual({ graceful: false })
+    expect(stages).toEqual(['graceful', 'sigterm'])
+    expect(signals).toEqual(['SIGTERM'])
+  })
+
+  it('refuses to keep waiting after SIGKILL and names every stage it reached', async () => {
+    const stages: DesktopHostStopStage[] = []
+    const signals: string[] = []
+    await expect(awaitHostExit(new Promise<void>(() => {}), (signal) => { signals.push(signal) },
+      (stage) => { stages.push(stage) }, { graceful: 5, sigterm: 5, sigkill: 5 }))
+      .rejects.toThrow('dsh desktop host did not exit after SIGKILL')
+    expect(stages).toEqual(['graceful', 'sigterm', 'sigkill'])
+    expect(signals).toEqual(['SIGTERM', 'SIGKILL'])
+  })
+
   it('returns the Web authentication URL and waits for graceful shutdown', async () => {
     const runtime = projectWithHost()
     const failure = vi.fn()
@@ -262,7 +299,7 @@ describe('desktop host process', () => {
     const { url } = await host.start()
     // The R-16 bridge comment in `apps/desktop/src/host-process.ts` claims this default and
     // this single opt-out; both are asserted here so a change to either breaks a test.
-    expect((await (await fetch(url)).json()).internals).toBe(false)
+    expect((await (await fetch(url)).json() as { internals?: boolean }).internals).toBe(false)
   })
 
   it.each([

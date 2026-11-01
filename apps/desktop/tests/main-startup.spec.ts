@@ -108,6 +108,8 @@ const harness = await vi.hoisted(async () => {
     readonly maximize = vi.fn(() => { this.maximized = true; this.emit('maximize') })
     readonly setMinimumSize = vi.fn()
     readonly setTitleBarOverlay = vi.fn()
+    /** Taskbar progress shown while a quit is still waiting for the Host to stop. */
+    readonly setProgressBar = vi.fn()
     readonly setVibrancy = vi.fn()
     readonly setBackgroundColor = vi.fn()
     constructor(readonly options: { show: boolean; modal?: boolean }) {
@@ -1598,6 +1600,8 @@ describe('desktop main startup', () => {
     await host.stopping.promise
     host.exited.resolve()
     await expect(preparing).resolves.toBe(true)
+    // The taskbar progress shown while the Host stopped is cleared once it settles.
+    expect(harness.windows[0]!.setProgressBar).toHaveBeenCalledWith(-1)
   })
 
   it('continues installation after reporting file cleanup failure', async () => {
@@ -2633,7 +2637,7 @@ describe('desktop runtime integrity at startup', () => {
     expect(harness.dialog.showMessageBoxSync).toHaveBeenCalledWith(expect.objectContaining({
       type: 'error',
       title: en.runtimeIntegrityTitle,
-      detail: expect.stringContaining('node_modules/@deepseek-ai/dsh-desktop-host/lib/index.js'),
+      detail: expect.stringContaining('node_modules/@deepseek-ai/dsh-desktop-host/lib/index.js') as unknown as string,
     }))
     expect(harness.app.quit).toHaveBeenCalled()
     expect(integrity.verifyRuntimeInBackground).not.toHaveBeenCalled()
@@ -2660,7 +2664,7 @@ describe('desktop runtime integrity at startup', () => {
     }))
     expect(harness.dialog.showMessageBoxSync).toHaveBeenCalledWith(expect.objectContaining({
       title: en.runtimeIntegrityTitle,
-      detail: expect.stringContaining('node_modules/@deepseek-ai/dsh-base/bundle.yml'),
+      detail: expect.stringContaining('node_modules/@deepseek-ai/dsh-base/bundle.yml') as unknown as string,
     }))
     expect(harness.app.quit).toHaveBeenCalled()
   })
