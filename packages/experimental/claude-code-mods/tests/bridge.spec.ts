@@ -13,7 +13,7 @@ import AgentLoop from '@deepseek-ai/dsh-agent-loop'
 import { mountAgentLoopTestDependencies } from '@deepseek-ai/dsh-agent-loop-testkit'
 import CommandRuntime from '@deepseek-ai/dsh-commands'
 import LocalFileSystem from '@deepseek-ai/dsh-fs-local'
-import WorkingDirectory from '@deepseek-ai/dsh-working-directory'
+import WorkingDirectory, { quoteContextPath } from '@deepseek-ai/dsh-working-directory'
 import { createAssistantMessage, createUserMessage, ToolCallId as ToolCallIdOf } from '@deepseek-ai/dsh-llm'
 import type { LlmResolvedModelInfo } from '@deepseek-ai/dsh-llm'
 import TokenMeter from '@deepseek-ai/dsh-token-meter'
@@ -539,7 +539,7 @@ describe('the mods API over harness services', () => {
         usage: { startedAt: agent.session.header.createdAt, context: { window: 0 }, rateLimits: [] },
         messages: [
           { role: 'user', text: 'hello', toolUses: [] },
-          { role: 'user', text: `Current runtime context. This snapshot supersedes earlier runtime-context snapshots.\n\nCurrent working directory: ${JSON.stringify(h.workspace)}.`, toolUses: [] },
+          { role: 'user', text: `Current runtime context. This snapshot supersedes earlier runtime-context snapshots.\n\nCurrent working directory: ${quoteContextPath(h.workspace)}.`, toolUses: [] },
           { role: 'assistant', text: 'ok', toolUses: [] },
         ],
       })

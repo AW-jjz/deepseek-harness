@@ -294,6 +294,24 @@ export function tokenizeSessionFixtureCwd(rawLog: string): string {
 }
 
 /**
+ * Inverse of {@link tokenizeSessionFixtureCwd} for replay: splice one run's real
+ * workspace back into a fixture that stores `{{cwd}}`.
+ *
+ * The token always sits inside a JSON string literal (the tokenizer writes it
+ * with `JSON.stringify`), so the replacement is JSON-escaped. A Windows path
+ * carries backslashes, which are illegal as raw escape sequences: replacing the
+ * token verbatim makes every affected line unparseable, which on a POSIX runner
+ * never surfaces because `/` needs no escaping.
+ *
+ * @param text The fixture text holding `{{cwd}}` placeholders.
+ * @param cwd The workspace the replay runs in.
+ * @returns The fixture text with every placeholder replaced by `cwd`.
+ */
+export function hydrateSessionFixtureCwd(text: string, cwd: string): string {
+  return text.replaceAll(CWD, JSON.stringify(cwd).slice(1, -1))
+}
+
+/**
  * Normalize a raw stdout transcript (newline-delimited JSON-RPC frames) into a stable expected output
  * in the same shape as the wire: one compact JSON frame per line (NDJSON), with the JSON-RPC
  * `id` rewritten to a per-transcript sequence (1, 2, 3, …) and all volatile strings scrubbed.

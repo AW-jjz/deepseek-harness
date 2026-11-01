@@ -12,6 +12,7 @@ import { DeepSeekAdapter, resolveAdapterOptions } from '@deepseek-ai/dsh-llm-dee
 import { SessionId } from '@deepseek-ai/dsh-session'
 import * as JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
 import * as SubagentSpawn from '@deepseek-ai/dsh-subagent-spawn-in-process'
+import { quoteContextPath } from '@deepseek-ai/dsh-working-directory'
 import { end, MODEL, server, sse, start } from '../../../llm/llm-deepseek/tests/helpers.ts'
 import SubagentRuntime, { type SubagentRunEndInfo } from '../src/index.ts'
 import { loadStoredSession } from './persistence-helpers.ts'
@@ -89,7 +90,7 @@ it('continues the parent through default Messages after a reasoning-bearing cont
       {
         type: 'text',
         text: 'Current runtime context. This snapshot supersedes earlier runtime-context snapshots.\n\n'
-          + `Current working directory: ${JSON.stringify(process.cwd())}.`,
+          + `Current working directory: ${quoteContextPath(process.cwd())}.`,
       },
     ]
     expect(requests[1]?.body).toMatchObject({ messages: [{ role: 'user', content: noticeWithContext }] })

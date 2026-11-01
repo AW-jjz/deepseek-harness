@@ -4,6 +4,7 @@ import { prepareSessionSnapshotFixtureForComparison } from '@deepseek-ai/dsh-llm
 import {
   type NormalizeContext,
   extractSnapshotSpillPaths,
+  hydrateSessionFixtureCwd,
   normalizeSessionLog,
   normalizeSessionFormatMetadata,
   normalizeSessionSnapshot,
@@ -1085,6 +1086,36 @@ describe('tokenizeSessionFixtureCwd', () => {
     expect(() => tokenizeSessionFixtureCwd('')).toThrow(
       'acp-snapshot: cannot tokenize a cwd without a basename',
     )
+  })
+})
+
+describe('hydrateSessionFixtureCwd', () => {
+  const fixture = [
+    JSON.stringify({ type: 'session', version: 0, id: 's', createdAt: 1, cwd: '{{cwd}}' }),
+    JSON.stringify({ type: 'tool/result', seq: 1, time: 2, data: { path: '{{cwd}}/proof.txt' } }),
+    '',
+  ].join('\n')
+
+  it('splices a Windows path as a valid JSON string again', () => {
+    const cwd = String.raw`E:\AI\dsh-s1\.snapshot-tmp\run-7`
+    const hydrated = hydrateSessionFixtureCwd(fixture, cwd)
+    const [first, second] = hydrated.split('\n')
+    // The verbatim splice was the bug: `\A` is not a JSON escape.
+    expect(JSON.parse(first as string)).toMatchObject({ cwd })
+    expect(JSON.parse(second as string)).toMatchObject({ data: { path: `${cwd}/proof.txt` } })
+    expect(hydrated).toContain(String.raw`E:\\AI\\dsh-s1`)
+  })
+
+  it('splices a POSIX path unchanged', () => {
+    const cwd = '/tmp/dsh-snapshot-cwd-ab12'
+    const hydrated = hydrateSessionFixtureCwd(fixture, cwd)
+    expect(JSON.parse(hydrated.split('\n')[0] as string)).toMatchObject({ cwd })
+    expect(hydrated).toContain(`"cwd":"${cwd}"`)
+  })
+
+  it('leaves a fixture without the token byte-identical', () => {
+    const plain = `${JSON.stringify({ type: 'session', version: 0, id: 's', createdAt: 1, cwd: '/tmp/x' })}\n`
+    expect(hydrateSessionFixtureCwd(plain, '/tmp/y')).toBe(plain)
   })
 })
 

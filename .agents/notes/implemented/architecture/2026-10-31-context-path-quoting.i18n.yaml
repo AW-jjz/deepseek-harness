@@ -1,0 +1,19 @@
+# Bilingual-pair consistency record for 2026-10-31-context-path-quoting.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/implemented/architecture/2026-10-31-context-path-quoting.md
+/agent-note-the-runtime-context-directory-is-quoted-not-json-encoded:
+  en: cc58e14e8afe80d0
+  zh: de00ee2e02ca5641
+/agent-note-the-runtime-context-directory-is-quoted-not-json-encoded/problem:
+  en: 390e87bd50e83a9a
+  zh: 7399c8000205548a
+/agent-note-the-runtime-context-directory-is-quoted-not-json-encoded/decision:
+  en: 22ccebf884fe682e
+  zh: b189dacb1a100886
+/agent-note-the-runtime-context-directory-is-quoted-not-json-encoded/alternatives-considered:
+  en: 3b153d316af40ac2
+  zh: 6ad9fdeb97951442
+/agent-note-the-runtime-context-directory-is-quoted-not-json-encoded/consequences:
+  en: 23a40075d2ee788c
+  zh: e85785ef26da62ea

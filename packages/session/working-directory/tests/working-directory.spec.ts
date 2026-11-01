@@ -6,7 +6,7 @@ import { setImmediate } from 'node:timers/promises'
 import { Context } from '@deepseek-ai/cordis'
 import { describe, expect, it, vi } from 'vitest'
 import LocalFileSystem from '@deepseek-ai/dsh-fs-local'
-import WorkingDirectory, { type Config as WorkingDirectoryConfig } from '@deepseek-ai/dsh-working-directory'
+import WorkingDirectory, { quoteContextPath, type Config as WorkingDirectoryConfig } from '@deepseek-ai/dsh-working-directory'
 import { mountAgentLoopTestDependencies, mountAgentLoopTestHarness } from '@deepseek-ai/dsh-agent-loop-testkit'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import { ToolCallId } from '@deepseek-ai/dsh-llm'
@@ -144,7 +144,7 @@ describe('Session working directories', () => {
     await f.ctx.workingDirectory.set(f.agent, child)
     await rm(child, { recursive: true })
     const assembly = await f.ctx.systemPrompt.assemble({ agent: f.agent, scope: f.agent })
-    expect(renderContextSnapshot(assembly)).toContain(`Current working directory: ${JSON.stringify(f.root)}.`)
+    expect(renderContextSnapshot(assembly)).toContain(`Current working directory: ${quoteContextPath(f.root)}.`)
     expect(renderPrompt(assembly)).not.toContain(f.root)
     expect(renderContextSnapshot(await f.ctx.systemPrompt.assemble())).toBe('')
   })
@@ -189,7 +189,7 @@ describe('Session working directories', () => {
     })
     const assembled = await f.ctx.systemPrompt.assemble({ agent: f.agent, scope: f.agent })
     expect(assembled.contexts).toEqual([{
-      name: 'working-directory:current', text: `Current working directory: ${JSON.stringify(f.root)}.`, interpolate: false,
+      name: 'working-directory:current', text: `Current working directory: ${quoteContextPath(f.root)}.`, interpolate: false,
     }])
     expect(renderPrompt(assembled)).not.toContain(f.root)
   })
@@ -204,7 +204,7 @@ describe('Session working directories', () => {
     }
     await f.ctx.workingDirectory.set(f.agent, directory)
     const assembly = await f.ctx.systemPrompt.assemble({ agent: f.agent, scope: f.agent })
-    expect(renderContextSnapshot(assembly)).toContain(`Current working directory: ${JSON.stringify(directory)}.`)
+    expect(renderContextSnapshot(assembly)).toContain(`Current working directory: ${quoteContextPath(directory)}.`)
     expect(renderContextSnapshot(assembly)).not.toContain('wrong-directory')
   })
 
@@ -331,7 +331,7 @@ describe('Session working directories', () => {
       })
       try {
         expect(renderContextSnapshot(await f.ctx.systemPrompt.assemble({ agent: restored.agent, scope: restored.agent })))
-          .toContain(`Current working directory: ${JSON.stringify(child)}.`)
+          .toContain(`Current working directory: ${quoteContextPath(child)}.`)
       } finally {
         await restored.dispose()
       }

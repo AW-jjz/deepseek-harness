@@ -53,6 +53,22 @@ export interface Config {
   defaultDirectory?: string
 }
 
+/**
+ * Quote the directory for the model-visible runtime-context line.
+ *
+ * `JSON.stringify` supplies the surrounding quotes and escapes a path that
+ * contains a quote character, but it also doubles every backslash: a Windows
+ * directory would reach the model as `"C:\\Users\\…"`, a spelling no tool
+ * resolves. Undo only the backslash doubling, so the quoted text names the same
+ * path the tools see and a POSIX directory renders byte-identically.
+ *
+ * @param path Absolute directory to render.
+ * @returns The double-quoted directory with single separators.
+ */
+export function quoteContextPath(path: string): string {
+  return JSON.stringify(path).replaceAll('\\\\', '\\')
+}
+
 /** One owner for each Session's effective directory and its model-visible changes. */
 export class WorkingDirectoryService extends Service {
   static inject = ['fs', 'sessionProjections', 'systemPrompt']
@@ -170,7 +186,7 @@ export class WorkingDirectoryService extends Service {
   }
 
   private contextText(session: Session): string {
-    return `Current working directory: ${JSON.stringify(this.get(session))}.`
+    return `Current working directory: ${quoteContextPath(this.get(session))}.`
   }
 
   private async directory(path: string, cwd: string, signal: AbortSignal): Promise<string> {

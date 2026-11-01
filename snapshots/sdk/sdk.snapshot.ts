@@ -15,11 +15,13 @@ import { tmpdir } from 'node:os'
 import { basename, delimiter, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
+import { quoteContextPath } from '@deepseek-ai/dsh-working-directory'
 import {
   assertPersistedSessionVersion,
   assertSessionFixtureVersion,
   captureExpectedWorkspaceSnapshot,
   captureWorkspaceSnapshot,
+  hydrateSessionFixtureCwd,
   normalizeSessionFormatMetadata,
   normalizeSessionLog,
   normalizeSessionSnapshots,
@@ -389,7 +391,7 @@ async function hydrateReplayFixtures(scenario: CorpusScenario, cwd: string): Pro
   await mkdir(root, { recursive: true })
   return Promise.all((await fixtureFiles(scenario)).map(async (source) => {
     const destination = join(root, basename(source))
-    await writeFile(destination, (await readFile(source, 'utf8')).replaceAll('{{cwd}}', cwd))
+    await writeFile(destination, hydrateSessionFixtureCwd(await readFile(source, 'utf8'), cwd))
     return destination
   }))
 }
@@ -616,8 +618,8 @@ async function runScenario(scenario: CorpusScenario): Promise<{
   const workspaceParent = await realpath(tmpdir())
   let workspacePrefix = `sdk-snapshot-${scenario.name}-`
   if (scenario.name === 'minimal-image-compaction') {
-    // mkdtemp appends six characters; JSON quoting is part of the runtime-context text.
-    const paddingLength = 192 - JSON.stringify(join(workspaceParent, `${workspacePrefix}XXXXXX`)).length
+    // mkdtemp appends six characters; the runtime-context quoting is part of that text.
+    const paddingLength = 192 - quoteContextPath(join(workspaceParent, `${workspacePrefix}XXXXXX`)).length
     if (paddingLength < 0) throw new Error('compaction snapshot temporary root exceeds its fixed cwd text length')
     workspacePrefix += '-'.repeat(paddingLength)
   }

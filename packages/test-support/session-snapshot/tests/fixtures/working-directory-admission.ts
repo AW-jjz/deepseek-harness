@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict'
 import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-agent'
-import type {} from '@deepseek-ai/dsh-working-directory'
+import { quoteContextPath } from '@deepseek-ai/dsh-working-directory'
 
 /** Loader identity for the admission timing scene. */
 export const name = 'working-directory-admission'
@@ -24,8 +24,8 @@ export function apply(ctx: Context): void {
     first = false
     const agent = request.sessionId === undefined ? undefined : ctx.agents.get(request.sessionId)
     assert(agent !== undefined, 'admission request has no live Agent')
-    const current = `Current working directory: ${JSON.stringify(ctx.workingDirectory.get(agent.session))}.`
-    const old = `Current working directory: ${JSON.stringify(agent.session.header.cwd)}.`
+    const current = `Current working directory: ${quoteContextPath(ctx.workingDirectory.get(agent.session))}.`
+    const old = `Current working directory: ${quoteContextPath(agent.session.header.cwd ?? '')}.`
     const snapshots = request.messages.filter(message => message.role === 'user' && message.source?.kind === 'runtime-context')
     assert.equal(snapshots.length, 1)
     const text = snapshots.flatMap(message => message.content).flatMap(block => block.type === 'text' ? [block.text] : []).join('')
