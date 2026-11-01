@@ -38,6 +38,8 @@ import {
   reconcileCatalogCreationTimes,
   scenarioSkipped,
   restorePinnedToolSchemas,
+  sharedSnapshotWrite,
+  writeSharedSnapshot,
   type SharedSnapshotClaim,
   stabilizeRefreshLog,
   stdoutExpectedVariants,
@@ -473,6 +475,42 @@ describe('shared snapshot content', () => {
     expect(() => {
       claimSharedSnapshot(claims, 'shared/system-prompt.expected.md', 'third', 'different\n')
     }).toThrow(/diverged between first and third/)
+  })
+
+  it('lets only the sidecar owner write, and rejects a stale borrow', () => {
+    // The owner refreshes its own file.
+    expect(sharedSnapshotWrite('owner', 'owner', 'old\n', 'new\n')).toBe(true)
+    // A borrower whose bytes still match the committed sidecar writes nothing.
+    expect(sharedSnapshotWrite('owner', 'borrower', 'same\n', 'same\n')).toBe(false)
+    // A borrower that would change the owner's file fails instead of writing it: the owner
+    // did not run, so its fixtures and stdout expectation would be left behind.
+    expect(() => sharedSnapshotWrite('owner', 'borrower', 'old\n', 'new\n'))
+      .toThrow(/borrower borrows the sidecar owned by owner but generated different bytes/)
+    // An absent owner sidecar is the same mistake: a borrow cannot create it.
+    expect(() => sharedSnapshotWrite('owner', 'borrower', undefined, 'new\n'))
+      .toThrow(/refresh owner itself/)
+  })
+
+  it('writes a shared sidecar only for its owner', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'acp-shared-sidecar-'))
+    const path = join(dir, 'system-prompt.expected.md')
+    try {
+      // The owner creates its sidecar when absent and replaces it when present.
+      await writeSharedSnapshot(path, 'first\n', 'owner', 'owner')
+      expect(readFileSync(path, 'utf8')).toBe('first\n')
+      await writeSharedSnapshot(path, 'second\n', 'owner', 'owner')
+      expect(readFileSync(path, 'utf8')).toBe('second\n')
+      // A borrower whose bytes match leaves the owner's file alone.
+      writeFileSync(path, 'shared\n')
+      await writeSharedSnapshot(path, 'shared\n', 'owner', 'borrower')
+      expect(readFileSync(path, 'utf8')).toBe('shared\n')
+      // A borrower whose bytes differ fails instead of rewriting the owner's file.
+      await expect(writeSharedSnapshot(path, 'other\n', 'owner', 'borrower'))
+        .rejects.toThrow(/would leave owner half-updated/)
+      expect(readFileSync(path, 'utf8')).toBe('shared\n')
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 
   it('rejects identical committed content under different paths', () => {
