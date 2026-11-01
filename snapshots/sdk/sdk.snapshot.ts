@@ -31,6 +31,7 @@ import {
   normalizedToolSchemas,
   parseSnapshotManifest,
   parseToolSchemasSnapshot,
+  recordedCorpusEnvironment,
   redactSessionSnapshotIds,
   refreshFixtureReplacements,
   reconcileCatalogCreationTimes,
@@ -83,6 +84,11 @@ const mode = process.env.DSH_SNAPSHOT ?? 'replay'
 const recording = mode === 'record'
 const refreshing = mode === 'refresh'
 const sessionWriteMode = recording ? 'record' : refreshing ? 'refresh' : 'replay'
+// These corpora reproduce a POSIX host: every pinned header carries the bash tool and every
+// persisted log carries a POSIX skill catalog, so replay on another host would compare two
+// environments. Outside CI that skips (in CI it throws) through the shared boundary.
+const environment = recordedCorpusEnvironment(process.platform, process.env.CI !== undefined && process.env.CI !== '')
+if (environment.skipReason !== undefined) console.warn(`[snapshots:sdk] ${environment.skipReason}`)
 const RUNTIME_WORKSPACE_ENTRIES = [
   '.agents',
   '.child-dsh',
@@ -984,8 +990,8 @@ describe('TypeScript SDK snapshots over the jsonrpc runtime', () => {
   })
 
   for (const scenario of sdkScenarios) {
-    const scenarioTest = recording
-      && (scenario.manifest.recording === 'authored' || scenario.manifest.sessionFormat !== undefined)
+    const scenarioTest = environment.skipReason !== undefined
+      || (recording && (scenario.manifest.recording === 'authored' || scenario.manifest.sessionFormat !== undefined))
       ? it.skip
       : it
     scenarioTest(`${mode}s ${scenario.name} through dsh --profile ${scenario.manifest.profile}`, async () => {

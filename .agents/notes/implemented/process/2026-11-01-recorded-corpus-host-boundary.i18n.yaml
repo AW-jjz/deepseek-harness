@@ -1,0 +1,19 @@
+# Bilingual-pair consistency record for 2026-11-01-recorded-corpus-host-boundary.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/implemented/process/2026-11-01-recorded-corpus-host-boundary.md
+/agent-note-a-recorded-corpus-declares-the-host-it-reproduces:
+  en: 63d4ffe56daaa5d9
+  zh: 77c829b933944c96
+/agent-note-a-recorded-corpus-declares-the-host-it-reproduces/problem:
+  en: 563986932366c8e1
+  zh: 7c356b3bd2ac55b4
+/agent-note-a-recorded-corpus-declares-the-host-it-reproduces/decision:
+  en: 18cbfec2b0a20713
+  zh: 251ba186ef91bc2d
+/agent-note-a-recorded-corpus-declares-the-host-it-reproduces/alternatives-considered:
+  en: d46cdf5172a35bab
+  zh: 1b28fe0c88b931bc
+/agent-note-a-recorded-corpus-declares-the-host-it-reproduces/consequences:
+  en: ea4e9f4b43f6814d
+  zh: e851fef7dcfeb36a

@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url'
 import {
   defineAcpSnapshotSuite,
   parseSnapshotManifest,
+  recordedCorpusEnvironment,
   type Scenario,
   type SnapshotSuiteOptions,
 } from '@deepseek-ai/dsh-session-snapshot'
@@ -79,6 +80,9 @@ const scenarios: Scenario[] = controllerCases.map((controller) => {
   }
 })
 
+const environment = recordedCorpusEnvironment(process.platform, process.env.CI !== undefined && process.env.CI !== '')
+if (environment.skipReason !== undefined) console.warn(`[snapshots:acp] ${environment.skipReason}`)
+
 defineAcpSnapshotSuite({
   agent: {
     binScript: fileURLToPath(new URL('../../apps/cli/src/bin.ts', import.meta.url)),
@@ -89,4 +93,5 @@ defineAcpSnapshotSuite({
   snapshotsDir: corpusDir,
   scenarios,
   mode: snapshotMode(process.env.DSH_SNAPSHOT),
+  ...(environment.skipReason === undefined ? {} : { environmentSkipReason: environment.skipReason }),
 })

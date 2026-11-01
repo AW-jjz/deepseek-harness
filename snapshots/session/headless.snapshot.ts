@@ -29,6 +29,7 @@ import {
   normalizedToolSchemas,
   parseSnapshotManifest,
   parseToolSchemasSnapshot,
+  recordedCorpusEnvironment,
   redactSessionSnapshotIds,
   refreshFixtureReplacements,
   REPLAY_CREDENTIAL_ENV,
@@ -78,6 +79,11 @@ function snapshotMode(value: string | undefined): SnapshotMode {
 }
 
 const mode = snapshotMode(process.env.DSH_SNAPSHOT)
+// These corpora reproduce a POSIX host: every pinned header carries the bash tool and every
+// persisted log carries a POSIX skill catalog, so replay on another host would compare two
+// environments. Outside CI that skips (in CI it throws) through the shared boundary.
+const environment = recordedCorpusEnvironment(process.platform, process.env.CI !== undefined && process.env.CI !== '')
+if (environment.skipReason !== undefined) console.warn(`[snapshots:session] ${environment.skipReason}`)
 const RUNTIME_WORKSPACE_ENTRIES = ['.agents', '.dsh', '.snapshot-patches'] as const
 
 interface JsonObject {
@@ -1231,7 +1237,8 @@ describe('headless recorded-session snapshots', () => {
       ? [{ scenario, retainedToolInput: 'session.v3.jsonl' }] : [],
   ])
   for (const { scenario, retainedToolInput } of runs) {
-    const skipped = scenario.manifest.platform === 'posix' && process.platform === 'win32'
+    const skipped = environment.skipReason !== undefined
+      || scenario.manifest.platform === 'posix' && process.platform === 'win32'
       || scenario.manifest.platform === 'pwsh' && !hasPwsh
       || mode === 'record' && scenario.manifest.recording === 'authored'
       || mode === 'record' && scenario.manifest.sessionFormat !== undefined

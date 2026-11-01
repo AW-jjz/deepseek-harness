@@ -279,6 +279,15 @@ export interface SnapshotSuiteOptions {
    * caller owns; `pwshOnly` scenarios skip when this is not true).
    */
   hasPwsh?: boolean
+  /**
+   * Why this host cannot replay this suite's committed corpus, from
+   * {@link recordedCorpusEnvironment}. Set it when the whole corpus reproduces
+   * one host environment: every run test is then skipped for this reason
+   * instead of failing on an environment difference the code under test does
+   * not control. Per-scenario {@link Scenario.posixOnly} stays the tool for a
+   * single scenario inside an otherwise portable corpus.
+   */
+  environmentSkipReason?: string
 }
 
 /** One scenario's generated claim on a shared snapshot file. */
@@ -1357,8 +1366,11 @@ export function defineAcpSnapshotSuite(options: SnapshotSuiteOptions): void {
     for (const scenario of scenarios) {
       // In RECORD mode, only re-run the `recorded` (live-API) scenarios; the `authored` ones
       // (sidecar-driven errors/cancel) are never re-recorded. `posixOnly` scenarios skip on Windows;
-      // `pwshOnly` scenarios skip when the caller's `hasPwsh` probe is false.
-      it.skipIf(scenarioSkipped(scenario, RECORDING, process.platform, options.hasPwsh))(`snapshot: ${scenario.name} matches the expected outputs`, async ({ expect }) => {
+      // `pwshOnly` scenarios skip when the caller's `hasPwsh` probe is false; a corpus that
+      // reproduces one host environment skips every scenario through `environmentSkipReason`.
+      const skipped = options.environmentSkipReason !== undefined
+        || scenarioSkipped(scenario, RECORDING, process.platform, options.hasPwsh)
+      it.skipIf(skipped)(`snapshot: ${scenario.name} matches the expected outputs`, async ({ expect }) => {
         const dir = join(snapshotsDir, scenario.name)
         const manifestPath = join(dir, 'snapshot.yml')
         const manifest = parseSnapshotManifest(await readFile(manifestPath, 'utf8'), manifestPath)

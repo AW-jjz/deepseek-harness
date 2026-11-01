@@ -18,6 +18,11 @@
  */
 
 export {
+  RECORDED_CORPUS_HOST_PLATFORMS,
+  recordedCorpusEnvironment,
+  type RecordedCorpusEnvironment,
+} from './environment.ts'
+export {
   redactSessionSnapshotIds,
 } from './identity.ts'
 export {
