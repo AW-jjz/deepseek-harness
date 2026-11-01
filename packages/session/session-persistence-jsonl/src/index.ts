@@ -66,6 +66,17 @@ export type { JsonlCompression } from './format.ts'
  */
 const COLD_LOG_MEMO_MAX_ENTRIES = 2
 
+/**
+ * Artifact bytes the memo may retain across all of its entries. The entry
+ * window alone is not a memory bound: two parsed logs of a large session are
+ * tens of megabytes of live objects, and the artifact size is the only measure
+ * of a stored log available before it is decoded. This bounds retention, not
+ * any session's log — a log larger than the whole budget keeps its own entry,
+ * because the caller that just decoded it holds the same objects and evicting
+ * them would trade memory for a second full parse.
+ */
+const COLD_LOG_MEMO_MAX_BYTES = 8 * 1024 * 1024
+
 const DEFAULT_COMPRESSION: JsonlCompression = 'zstd'
 
 /**
@@ -320,6 +331,12 @@ class JsonlSessionPersistence extends SessionPersistence {
    * revision guard.
    */
   private readonly coldLogMemo = new Map<SessionId, StoredLog>()
+  /**
+   * Artifact bytes behind each memo entry, kept beside the entry rather than on
+   * it so a stored log stays exactly the seam's read result. The weak key set
+   * bounds nothing: an entry is gone from both maps together.
+   */
+  private readonly coldLogMemoBytes = new WeakMap<StoredLog, number>()
   /** One joinable decode/migration operation per selected historical Session file revision. */
   private readonly migrationPreparations = new Map<SessionId, MigrationPreparation>()
 
@@ -976,7 +993,7 @@ class JsonlSessionPersistence extends SessionPersistence {
       revision: fileRevision(prepared.sourceIdentity),
       publication: { source: selected, value: prepared },
     }
-    this.memoizeStoredLog(id, stored)
+    this.memoizeStoredLog(id, stored, Number(prepared.sourceIdentity.size))
     return stored
   }
 
@@ -1001,7 +1018,7 @@ class JsonlSessionPersistence extends SessionPersistence {
       inheritedEventCount: stored.inheritedEventCount,
       revision: fileRevision(identity),
     }
-    this.memoizeStoredLog(id, published)
+    this.memoizeStoredLog(id, published, Number(identity.size))
     return published
   }
 
@@ -1104,18 +1121,40 @@ class JsonlSessionPersistence extends SessionPersistence {
       ...freezeStoredEvents(events),
       revision,
     }
-    this.memoizeStoredLog(expectedId, stored)
+    this.memoizeStoredLog(expectedId, stored, buffer.byteLength)
     return stored
   }
 
-  /** Insert one parsed log into the bounded handoff cache. */
-  private memoizeStoredLog(id: SessionId, stored: StoredLog): void {
+  /**
+   * Insert one parsed log into the bounded handoff cache: keep the newest
+   * entry, drop oldest-first until both the entry window and the retained-byte
+   * budget hold. A log larger than the whole budget keeps the window to
+   * itself, because the caller that just decoded it holds the same objects and
+   * evicting them would not free anything the process is not already using.
+   * @param id - the session the entry belongs to.
+   * @param stored - the parsed, validated log to retain.
+   * @param artifactBytes - the artifact size backing it, as the retention meter.
+   */
+  private memoizeStoredLog(id: SessionId, stored: StoredLog, artifactBytes: number): void {
     this.coldLogMemo.delete(id)
     this.coldLogMemo.set(id, stored)
-    for (const oldest of this.coldLogMemo.keys()) {
-      if (this.coldLogMemo.size <= COLD_LOG_MEMO_MAX_ENTRIES) break
-      this.coldLogMemo.delete(oldest)
+    this.coldLogMemoBytes.set(stored, artifactBytes)
+    const oversized = artifactBytes > COLD_LOG_MEMO_MAX_BYTES
+    let retainedBytes = 0
+    for (const entry of this.coldLogMemo.values()) retainedBytes += this.memoBytes(entry)
+    for (const [candidate, entry] of this.coldLogMemo) {
+      if (candidate === id) continue
+      if (!oversized
+        && this.coldLogMemo.size <= COLD_LOG_MEMO_MAX_ENTRIES
+        && retainedBytes <= COLD_LOG_MEMO_MAX_BYTES) break
+      this.coldLogMemo.delete(candidate)
+      retainedBytes -= this.memoBytes(entry)
     }
+  }
+
+  /** Artifact bytes registered with one memo entry; insertion registers every entry. */
+  private memoBytes(entry: StoredLog): number {
+    return this.coldLogMemoBytes.get(entry) as number
   }
 
   /**

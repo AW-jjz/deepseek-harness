@@ -1649,6 +1649,31 @@ describe('JsonlSessionPersistence: durability and crash semantics', () => {
     expect(readTally.bySuffix.get(rawLogPath(root, '/work', third.id))).toBe(1)
   })
 
+  it('the cold-log memo meters retained artifact bytes, not only the entry count', async () => {
+    const mib = 1024 * 1024
+    const internals = ctx.sessionPersistence as unknown as {
+      memoizeStoredLog(id: SessionId, stored: unknown, artifactBytes: number): void
+      memoBytes(entry: unknown): number
+      coldLogMemo: Map<SessionId, unknown>
+    }
+    internals.memoizeStoredLog(SessionId('memo-bytes-a'), { status: 'current' }, 5 * mib)
+    // Five and four megabytes fit the two-entry window but not the byte budget.
+    internals.memoizeStoredLog(SessionId('memo-bytes-b'), { status: 'current' }, 4 * mib)
+    expect([...internals.coldLogMemo.keys()]).toEqual([SessionId('memo-bytes-b')])
+    // A log above the whole budget keeps the window to itself.
+    internals.memoizeStoredLog(SessionId('memo-bytes-c'), { status: 'current' }, 9 * mib)
+    expect([...internals.coldLogMemo.keys()]).toEqual([SessionId('memo-bytes-c')])
+
+    // A real read enters the same meter with the artifact size it just parsed,
+    // and summarizing the whole window drops the over-budget fake above.
+    const m = meta('memo-bytes-real', '/work')
+    await writeLog(ctx.sessionPersistence, m, oneTurnLog())
+    await readAll(ctx.sessionPersistence, m.id)
+    const entry = internals.coldLogMemo.get(m.id)
+    expect(internals.memoBytes(entry)).toBe((await stat(rawLogPath(root, '/work', m.id))).size)
+    expect([...internals.coldLogMemo.keys()]).toEqual([m.id])
+  })
+
   it('a handle read retries once when the file revision changes during the read', async () => {
     const m = meta('read-revision-race', '/work')
     await writeLog(ctx.sessionPersistence, m, oneTurnLog())
